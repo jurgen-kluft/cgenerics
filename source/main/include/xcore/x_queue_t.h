@@ -31,29 +31,22 @@ namespace xcore
 	{
 	public:
 		queue_iter_t(slice_t<T>& _slice, s32 head, s32 tail) 
-			: m_state(START)
-			, m_index(head)
-			, m_head(head)
+			: m_head(head)
 			, m_tail(tail)
-			, m_size(head - tail)
+			, m_current(head)
 			, m_slice(_slice) 
 		{ 
 		}
 
-		s32				index() const			{ return m_index; }
+		s32				index() const			{ return (m_current - m_head); }
 		T const&		item() const			{ return m_slice[m_current]; }
 		T const&		operator * (void) const	{ return m_slice[m_current]; }
 
 		void			reset();
 		bool			iterate();
 
-		enum EState { START, ITERATE, END };
-		s32				m_state;
-		u32				m_index;
-
 		s32				m_head;
 		s32				m_tail;
-		s32				m_size;
 		s32				m_current;
 		slice_t<T>&		m_slice;
 	};
@@ -142,31 +135,17 @@ namespace xcore
 	template<typename T>
 	void			queue_iter_t<T>::reset()
 	{
-		m_state = START;
-		m_index = 0;
-		m_size = m_slice.size();
-		m_current = (m_head - m_index) % m_size;
+		m_current = m_head;
 	}
 
 	template<typename T>
 	bool			queue_iter_t<T>::iterate()
 	{
-		if (m_state == ITERATE) {
-			++m_index;
-			m_current = (m_head - m_index) % m_size;
-		}
-		else if (m_state == END) {
-			return false;
-		}
-		else if (m_state == START) {
-			reset();
-			m_state = ITERATE;
-		}
-
-		if ((m_head - m_current) != m_tail)
+		if (m_current < m_tail)
+		{
+			m_current++;
 			return true;
-
-		m_state = END;
+		}
 		return false;
 	}
 
@@ -197,7 +176,7 @@ namespace xcore
 	template<typename T>
 	inline bool			iterate(queue_iter_t<T>& iter)
 	{
-		return iter.next();
+		return iter.iterate();
 	}
 
 }
