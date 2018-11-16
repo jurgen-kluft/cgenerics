@@ -75,8 +75,6 @@ bool gRunUnitTest(UnitTest::TestReporter& reporter)
 	xcore::UnitTestAllocator unittestAllocator( xcore::x_iallocator::get_default() );
 	UnitTest::SetAllocator(&unittestAllocator);
 
-	xcore::xconsole::add_default_console();
-
 	xcore::TestAllocator testAllocator(xcore::x_iallocator::get_default());
 	gTestAllocator = &testAllocator;
 
