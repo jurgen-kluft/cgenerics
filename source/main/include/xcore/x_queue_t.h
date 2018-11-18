@@ -11,152 +11,169 @@
 #include "xbase/x_debug.h"
 #include "xbase/x_allocator.h"
 #include "xbase/x_range.h"
-#include "xbase/x_slice_t.h"
 
+// ----------------------------------------------------------------------------------------
+//   QUEUE
+// ----------------------------------------------------------------------------------------
 
-//==============================================================================
-// xCore namespace
-//==============================================================================
 namespace xcore
 {
-	// ----------------------------------------------------------------------------------------
-	//   QUEUE
-	// ----------------------------------------------------------------------------------------
-
 	template<typename T>
-	class queue_t;
-
-	template<typename T>
-	class queue_iter_t
+	class queue_is_nill_t
 	{
 	public:
-		queue_iter_t(slice_t<T>& _slice, s32 head, s32 tail) 
-			: m_head(head)
-			, m_tail(tail)
-			, m_current(head)
-			, m_slice(_slice) 
-		{ 
-		}
+					queue_as_array_t(xalloc* allocator, s32 max) {}
 
-		s32				index() const			{ return (m_current - m_head); }
-		T const&		item() const			{ return m_slice[m_current]; }
-		T const&		operator * (void) const	{ return m_slice[m_current]; }
-
-		void			reset();
-		bool			iterate();
-
-		s32				m_head;
-		s32				m_tail;
-		s32				m_current;
-		slice_t<T>&		m_slice;
+		s32			max() const				{ return 0; }
+		s32			size() const			{ return 0; }
+		bool		is_empty() const		{ return true; }
+		bool		is_full() const			{ return true; }
+		bool		enqueue(T const& item)	{ return false; }
+		bool		dequeue(T& item)		{ return false; }
 	};
 
 	template<typename T>
+	class queue_as_array_t
+	{
+		xalloc*		m_allocator;
+		T*			m_array;
+		s32			m_max;
+		s32			m_head;
+		s32			m_tail;
+
+	public:
+					queue_as_array_t(xalloc* allocator, s32 max) : m_allocator(allocator), m_max(max) 
+					{
+						m_array = (T*)m_allocator->allocator(sizeof(T) * m_max, X_ALIGNMENT_DEFAULT);
+					}
+					~queue_as_array_t()
+					{
+						//TODO: called a destructor on every still present item
+						m_allocator->deallocate(m_array);
+						m_array = NULL;
+					}
+
+		s32			max() const				{ return m_max; }
+		s32			size() const			{ return m_head - m_tail; }
+		bool		is_empty() const		{ return m_tail == m_head; }
+		bool		is_full() const			{ return (m_head > m_tail) && (m_head % max()) == m_tail; }
+
+		bool		enqueue(T const& item)
+		{
+			if (is_full())
+				return false;
+			s32 const index = m_head % max();
+			m_data[index] = item;
+			m_head++;
+			return true;
+		}
+		bool		dequeue(T& item)
+		{
+			if (is_empty())
+				return false;
+			s32 const index = m_tail % max();
+			item = m_data[index];
+			m_tail += 1;
+			if (m_tail >= max())
+			{
+				m_tail = m_tail % max();
+				m_head = m_head % max();
+			}
+			return true;
+		}
+	};
+
+	template<typename T>
+	class queue_as_list_t
+	{
+		struct node_t
+		{
+			inline		node_t() : m_next(NULL), m_prev(NULL) {}
+			inline		node_t(const T& item) : m_next(NULL), m_prev(NULL), m_item(item) {}
+			node_t*		m_next;
+			node_t*		m_prev;
+			T			m_item;
+		};
+		xalloc*		m_allocator;
+		node_t		m_sentry;
+		s32			m_max;
+		s32			m_size;
+
+	public:
+					queue_as_list_t(xalloc* allocator, s32 max) : m_allocator(allocator), m_max(max), m_size(0) 
+					{
+						m_sentry.m_next = &m_sentry;
+						m_sentry.m_prev = &m_sentry;
+					}
+					~queue_as_list() 
+					{
+						xheap node_heap(m_allocator);
+						node_t* node = m_sentry.m_next;
+						while (node != NULL)
+						{
+							node_t* next = node->m_next;
+							node_heap.destruct<node_t>(node);
+							node = next;
+						}
+					}
+		s32			max() const					{ return xlimits<s32>::max(); }
+		s32			size() const				{ return m_size; }
+		bool		is_empty() const			{ return m_size == 0; }
+		bool		is_full() const				{ return false; }
+		
+		bool		enqueue(T const& item)
+		{
+			xheap node_heap(m_allocator);
+			node_t* node = node_heap.construct<node_t>(item);
+			node->m_next = &m_sentry;
+			node->m_prev = m_sentry.m_prev;
+			node->m_prev->m_next = node;
+			m_size++;
+			return true;
+		}
+		bool		dequeue(T& item)
+		{
+			if (m_size > 0)
+			{
+				node_t* node = m_sentry.m_next;
+				m_sentry.m_next = node->m_next;
+				m_sentry.m_next->m_prev = &m_sentry;
+				item = node->m_item;
+				xheap heap(m_allocator);
+				heap.destruct<node_t>(node);
+				m_size--;
+				return true;
+			}
+			return false;
+		}
+	};
+
+	template<typename T, typename S>
+	class queue_t;
+
+	template<typename T, typename S = queue_as_array_t>
 	class queue_t
 	{
 	public:
-		inline			queue_t() : m_head(0), m_tail(0) {}
+		inline			queue_t(xalloc* allocator, u32 max) : m_strategy(allocator, max) { }
 
-		u32				size() const;
-		u32				max() const;
+		u32				size() const			{ return m_strategy.size(); }
+		u32				max() const				{ return m_strategy.max(); }
 
-		bool			is_empty() const;
-		bool			is_full() const;
+		bool			is_empty() const		{ return m_strategy.is_empty(); }
+		bool			is_full() const			{ return m_strategy.is_full(); }
 
-		bool			push(T const& item);
-		bool			pop(T& item);
+		bool			enqueue(T const& item)	{ return m_strategy.enqueue(item); }
+		bool			dequeue(T& item)		{ return m_strategy.dequeue(item); }
 
-		typedef			queue_iter_t<T>		iter_t;
-		iter_t			begin() const;
-
-		u32				m_head;
-		u32				m_tail;
-		slice_t<T>		m_data;
+		S				m_strategy;
 	};
-
-	template<typename T>
-	u32				queue_t<T>::size() const
-	{
-		return m_head - m_tail;
-	}
-
-	template<typename T>
-	u32				queue_t<T>::max() const
-	{
-		return m_data.size();
-	}
-
-	template<typename T>
-	bool			queue_t<T>::is_empty() const
-	{
-		return m_head == m_tail;
-	}
-
-	template<typename T>
-	bool			queue_t<T>::is_full() const
-	{
-		return (m_head > m_tail) && (m_head % max()) == m_tail;
-	}
-
-	template<typename T>
-	bool			queue_t<T>::push(T const& item)
-	{
-		if (is_full())
-			return false;
-		s32 const index = m_head % max();
-		m_data[index] = item;
-		m_head++;
-		return true;
-	}
-
-	template<typename T>
-	bool			queue_t<T>::pop(T& item)
-	{
-		if (is_empty())
-			return false;
-		s32 const index = m_tail % max();
-		item = m_data[index];
-		m_tail += 1;
-		if (m_tail >= max())
-		{
-			m_tail = m_tail % max();
-			m_head = m_head % max();
-		}
-		return true;
-	}
-
-	template<typename T>
-	queue_iter_t<T>	queue_t<T>::begin() const
-	{
-		queue_t<T>::iter_t iter(m_data, m_head, m_tail);
-		return iter;
-	}
-
-	template<typename T>
-	void			queue_iter_t<T>::reset()
-	{
-		m_current = m_head;
-	}
-
-	template<typename T>
-	bool			queue_iter_t<T>::iterate()
-	{
-		if (m_current < m_tail)
-		{
-			m_current++;
-			return true;
-		}
-		return false;
-	}
 
 
 	template<typename T>
 	void				make(xalloc* mem, queue_t<T>& proto, s32 cap);
 	template<typename T>
 	bool				append(queue_t<T>& array, T const& element);
-	template<typename T>
-	bool				iterate(queue_iter_t<T>& iter);
-
 
 
 	template<typename T>
@@ -171,12 +188,6 @@ namespace xcore
 	inline bool			append(queue_t<T>& q, T const& element)
 	{
 		return q.push(element);
-	}
-
-	template<typename T>
-	inline bool			iterate(queue_iter_t<T>& iter)
-	{
-		return iter.iterate();
 	}
 
 }
