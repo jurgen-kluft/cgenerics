@@ -22,7 +22,8 @@ namespace xcore
 	class queue_is_nill_t
 	{
 	public:
-					queue_as_array_t(xalloc* allocator, s32 max) {}
+					queue_is_nill_t() : m_allocator(nullptr), m_max(0), m_size(0) {}
+					queue_is_nill_t(xalloc* allocator, s32 max) {}
 
 		s32			max() const				{ return 0; }
 		s32			size() const			{ return 0; }
@@ -42,6 +43,9 @@ namespace xcore
 		s32			m_tail;
 
 	public:
+					queue_as_array_t() : m_allocator(nullptr), m_array(nullptr), m_max(0), m_head(0), m_tail(0) 
+					{
+					}
 					queue_as_array_t(xalloc* allocator, s32 max) : m_allocator(allocator), m_max(max) 
 					{
 						m_array = (T*)m_allocator->allocator(sizeof(T) * m_max, X_ALIGNMENT_DEFAULT);
@@ -100,6 +104,10 @@ namespace xcore
 		s32			m_size;
 
 	public:
+					queue_as_list_t() : m_allocator(nullptr), m_max(0), m_size(0) 
+					{
+					}
+
 					queue_as_list_t(xalloc* allocator, s32 max) : m_allocator(allocator), m_max(max), m_size(0) 
 					{
 						m_sentry.m_next = &m_sentry;
@@ -107,15 +115,32 @@ namespace xcore
 					}
 					~queue_as_list() 
 					{
-						xheap node_heap(m_allocator);
-						node_t* node = m_sentry.m_next;
-						while (node != NULL)
-						{
-							node_t* next = node->m_next;
-							node_heap.destruct<node_t>(node);
-							node = next;
-						}
+						clear();
 					}
+
+		void			make(xalloc* allocator, s32 max) 
+		{
+			m_allocator = allocator;
+			m_max = max;
+			m_size = 0;
+			m_sentry.m_next = &m_sentry;
+			m_sentry.m_prev = &m_sentry;
+		}
+
+		void		clear()
+		{
+			xheap node_heap(m_allocator);
+			node_t* node = dequeue_node();
+			while (node != nullptr)
+			{
+				node_heap.destruct<node_t>(node);
+				node = dequeue_node();
+			}
+			m_size = 0;
+			m_sentry.m_next = &m_sentry;
+			m_sentry.m_prev = &m_sentry;
+		}
+
 		s32			max() const					{ return xlimits<s32>::max(); }
 		s32			size() const				{ return m_size; }
 		bool		is_empty() const			{ return m_size == 0; }
@@ -133,32 +158,43 @@ namespace xcore
 		}
 		bool		dequeue(T& item)
 		{
+			node_t* node = dequeue_node();
+			if (node == nullptr)
+				return false;
+			xheap heap(m_allocator);
+			item = node->m_item;
+			heap.destruct(node);
+			return true;
+		}
+	private:
+		node_t*		dequeue_node()
+		{
 			if (m_size > 0)
 			{
 				node_t* node = m_sentry.m_next;
 				m_sentry.m_next = node->m_next;
 				m_sentry.m_next->m_prev = &m_sentry;
-				item = node->m_item;
-				xheap heap(m_allocator);
-				heap.destruct<node_t>(node);
 				m_size--;
-				return true;
+				return node;
 			}
-			return false;
+			return nullptr;
 		}
 	};
-
-	template<typename T, typename S>
-	class queue_t;
 
 	template<typename T, typename S = queue_as_array_t>
 	class queue_t
 	{
 	public:
-		inline			queue_t(xalloc* allocator, u32 max) : m_strategy(allocator, max) { }
+		inline			queue_t() : m_strategy() { }
+		inline			queue_t(xalloc* allocator, s32 max) : m_strategy(allocator, max) { }
 
-		u32				size() const			{ return m_strategy.size(); }
-		u32				max() const				{ return m_strategy.max(); }
+		void			make(xalloc* allocator, s32 max) 
+		{
+			m_strategy.make(allocator, max)
+		}
+
+		s32				size() const			{ return m_strategy.size(); }
+		s32				max() const				{ return m_strategy.max(); }
 
 		bool			is_empty() const		{ return m_strategy.is_empty(); }
 		bool			is_full() const			{ return m_strategy.is_full(); }
@@ -185,9 +221,15 @@ namespace xcore
 	}
 
 	template<typename T>
-	inline bool			append(queue_t<T>& q, T const& element)
+	inline bool			enqueue(queue_t<T>& q, T const& element)
 	{
-		return q.push(element);
+		return q.enqueue(element);
+	}
+
+	template<typename T>
+	inline bool			dequeue(queue_t<T>& q, T & element)
+	{
+		return q.dequeue(element);
 	}
 
 }

@@ -55,6 +55,8 @@ namespace xcore
 	template<typename T>
 	bool				append(array_t<T>& array, T const& element);
 	template<typename T>
+	bool				remove(array_t<T>& array, u32 index);
+	template<typename T>
 	void				sort(array_t<T>& array);
 
 
@@ -133,7 +135,8 @@ namespace xcore
 			array.m_data[array.m_size] = element;
 			array.m_size += 1;
 		}
-		else {
+		else
+		{
 			// Make a copy, first see what kind of size we need
 			if (array.size() == maxsize)
 				maxsize += 2 * (maxsize / 3);
@@ -144,7 +147,22 @@ namespace xcore
 		}
 		return true;
 	}
-	
+
+	template<typename T>
+	inline bool			remove(array_t<T>& array, u32 index)
+	{
+		if (index < array.m_size)
+		{
+			// Swap Remove
+			array.m_size--;
+			if (index < array.m_size) {
+				array.m_data[index] = array.m_data[array.m_size];
+			}
+			return true;
+		}
+		return false;
+	}
+
 	template<typename T>
 	inline void			sort(array_t<T>& array)
 	{
