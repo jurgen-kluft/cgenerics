@@ -12,21 +12,28 @@
 ## trie-tree map
 
 ```c++
+class xalloc;
+class ttmap;
+
 void (*ttmap_hash_fn)(const void* key, u64& high, u64& low);
+
 struct ttmap_value
 {
     tmap_value(void const* key, void*& value);
-    tmap_value(void const* key, tmap_hash_fn key_hasher, void*& value);
 
     void            remove();
 
-    operator        bool ()       { return m_key != nullptr; }
-    operator        bool () const { return m_key != nullptr; }
+    ttmap_value&    operator =  (const void* value);
 
-    ttmap_value&     operator = (const void* value);
+    bool            operator == (ttmap_value const& iter) const;
+    bool            operator != (ttmap_value const& iter) const;
+
+    bool            empty() const { return m_key == nullptr; }
+    const void*     key() const   { return m_key; }
+    const void*     value() const { return m_value; }
 
 private:
-    ttmap*           m_tmap;
+    ttmap*          m_tmap;
     void const*     m_key;
     void *&         m_value;
 };
@@ -35,31 +42,36 @@ struct ttmap_idxer
 {
     u64     m_hash[2];
     u32     m_rootsize;
+    s32     m_depth;
 
+    void    reset();
+    s32     next();
 };
 
 class ttmap
 {
 public:
-    ttmap(u32 sizeofkey);
+    ttmap(xalloc* allocator, u32 sizeofkey);
+    ttmap(xalloc* allocator, u32 sizeofkey, tmap_hash_fn key_hasher);
 
     ttmap_value  operator [] (const void* key);
     ttmap_cvalue operator [] (const void* key) const;
 
 protected:
     // highest bit is used to identify between a node and item
-    struct ttnode
+    struct node
     {
         u32 elements[4];
     };
-    struct ttitem
+    struct item
     {
         void const* m_key;
         void const* m_value;
     };
 
+    xalloc*     m_allocator;
     u32         m_rootsize;
-    ttnode*     m_roottable;
+    u32*        m_roottable;
 
     friend struct ttmap_value;
     void insert(const void* key, const void* value);
