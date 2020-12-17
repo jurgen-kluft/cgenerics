@@ -23,7 +23,7 @@ namespace xcore
 	{
 	public:
 					queue_is_nill_t() : m_allocator(nullptr), m_max(0), m_size(0) {}
-					queue_is_nill_t(xalloc* allocator, s32 max) {}
+					queue_is_nill_t(alloc_t* allocator, s32 max) {}
 
 		s32			max() const				{ return 0; }
 		s32			size() const			{ return 0; }
@@ -36,7 +36,7 @@ namespace xcore
 	template<typename T>
 	class queue_as_array_t
 	{
-		xalloc*		m_allocator;
+		alloc_t*		m_allocator;
 		T*			m_array;
 		s32			m_max;
 		s32			m_head;
@@ -46,7 +46,7 @@ namespace xcore
 					queue_as_array_t() : m_allocator(nullptr), m_array(nullptr), m_max(0), m_head(0), m_tail(0) 
 					{
 					}
-					queue_as_array_t(xalloc* allocator, s32 max) : m_allocator(allocator), m_max(max) 
+					queue_as_array_t(alloc_t* allocator, s32 max) : m_allocator(allocator), m_max(max) 
 					{
 						m_array = (T*)m_allocator->allocator(sizeof(T) * m_max, X_ALIGNMENT_DEFAULT);
 					}
@@ -98,7 +98,7 @@ namespace xcore
 			node_t*		m_prev;
 			T			m_item;
 		};
-		xalloc*		m_allocator;
+		alloc_t*		m_allocator;
 		node_t		m_sentry;
 		s32			m_max;
 		s32			m_size;
@@ -108,7 +108,7 @@ namespace xcore
 					{
 					}
 
-					queue_as_list_t(xalloc* allocator, s32 max) : m_allocator(allocator), m_max(max), m_size(0) 
+					queue_as_list_t(alloc_t* allocator, s32 max) : m_allocator(allocator), m_max(max), m_size(0) 
 					{
 						m_sentry.m_next = &m_sentry;
 						m_sentry.m_prev = &m_sentry;
@@ -118,7 +118,7 @@ namespace xcore
 						clear();
 					}
 
-		void			make(xalloc* allocator, s32 max) 
+		void			make(alloc_t* allocator, s32 max) 
 		{
 			m_allocator = allocator;
 			m_max = max;
@@ -141,7 +141,7 @@ namespace xcore
 			m_sentry.m_prev = &m_sentry;
 		}
 
-		s32			max() const					{ return xlimits<s32>::max(); }
+		s32			max() const					{ return limits_t<s32>::max(); }
 		s32			size() const				{ return m_size; }
 		bool		is_empty() const			{ return m_size == 0; }
 		bool		is_full() const				{ return false; }
@@ -186,9 +186,9 @@ namespace xcore
 	{
 	public:
 		inline			queue_t() : m_strategy() { }
-		inline			queue_t(xalloc* allocator, s32 max) : m_strategy(allocator, max) { }
+		inline			queue_t(alloc_t* allocator, s32 max) : m_strategy(allocator, max) { }
 
-		void			make(xalloc* allocator, s32 max) 
+		void			make(alloc_t* allocator, s32 max) 
 		{
 			m_strategy.make(allocator, max)
 		}
@@ -207,13 +207,13 @@ namespace xcore
 
 
 	template<typename T>
-	void				make(xalloc* mem, queue_t<T>& proto, s32 cap);
+	void				make(alloc_t* mem, queue_t<T>& proto, s32 cap);
 	template<typename T>
 	bool				append(queue_t<T>& array, T const& element);
 
 
 	template<typename T>
-	inline void			make(xalloc* mem, queue_t<T>& proto, s32 cap)
+	inline void			make(alloc_t* mem, queue_t<T>& proto, s32 cap)
 	{
 		make(mem, proto.m_data, cap);
 		proto.m_head = 0;

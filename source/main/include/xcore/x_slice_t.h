@@ -20,7 +20,7 @@ namespace xcore
 {
 	//==============================================================================
 	// Slice
-	// A reference counted slice owning a memory block with a view/window (from,to).
+	// A reference counted slice_t owning a memory block with a view/window (from,to).
 	//==============================================================================
 	template<typename T>
 	class slice_t
@@ -28,7 +28,7 @@ namespace xcore
 	public:
 						slice_t();
 						slice_t(slice_t<T> const& other);
-						slice_t(xalloc* mem, s32 size);
+						slice_t(alloc_t* mem, s32 size);
 						~slice_t();
 
 		s32				size() const;
@@ -46,7 +46,7 @@ namespace xcore
 			return *this;
 		}
 
-		slice			m_slice;
+		slice_t			m_slice;
 	};
 
 	template<typename T>
@@ -56,7 +56,7 @@ namespace xcore
 	}
 
 	template<typename T>
-	inline slice_t<T>::slice_t(xalloc* mem, s32 count)
+	inline slice_t<T>::slice_t(alloc_t* mem, s32 count)
 		: m_slice(mem, count, sizeof(T))
 	{
 	}
@@ -82,17 +82,17 @@ namespace xcore
 	template<typename T>
 	inline slice_t<T>	slice_t<T>::operator () (s32 to) const
 	{
-		slice_t<T> slice;
-		slice.m_slice = m_slice.view(0, to);
-		return slice;
+		slice_t<T> slice_t;
+		slice_t.m_slice = m_slice.view(0, to);
+		return slice_t;
 	}
 	
 	template<typename T>
 	inline slice_t<T>	slice_t<T>::operator () (s32 from, s32 to) const
 	{
-		slice_t<T> slice;
-		slice.m_slice = m_slice.view(from, to);
-		return slice;
+		slice_t<T> slice_t;
+		slice_t.m_slice = m_slice.view(from, to);
+		return slice_t;
 	}
 
 	template<typename T>
@@ -110,12 +110,12 @@ namespace xcore
 	}
 
 	template<typename T>
-	void				make(xalloc* mem, slice_t<T>& proto, s32 size);
+	void				make(alloc_t* mem, slice_t<T>& proto, s32 size);
 
 	template<typename T>
-	inline void			make(xalloc* mem, slice_t<T>& proto, s32 size)
+	inline void			make(alloc_t* mem, slice_t<T>& proto, s32 size)
 	{
-		slice::alloc(proto.m_slice, mem, size, sizeof(T));
+		slice_t::alloc(proto.m_slice, mem, size, sizeof(T));
 	}
 
 }

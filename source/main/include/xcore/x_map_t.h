@@ -82,7 +82,7 @@ namespace xcore
 		K				m_empty_key;
 		V				m_empty_value;
 
-		xalloc*			m_mem;
+		alloc_t*			m_mem;
 
 		map_items_t<K, V> m_items;
 		map_nodes_t		m_nodes;
@@ -361,14 +361,14 @@ namespace xcore
 	}
 
 	template<typename K, typename V>
-	void				make(xalloc* mem, map_t<K, V>& proto, s32 cap);
+	void				make(alloc_t* mem, map_t<K, V>& proto, s32 cap);
 
 	template<typename K, typename V>
 	bool				iterate(map_iter_t<K, V>& iter);
 
 
 	template<typename K, typename V>
-	void				make(xalloc* mem, map_t<K, V>& proto, s32 cap)
+	void				make(alloc_t* mem, map_t<K, V>& proto, s32 cap)
 	{
 		proto.m_mem = mem;
 		make(mem, proto.m_items.m_items, cap);

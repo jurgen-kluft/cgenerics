@@ -11,7 +11,7 @@ UNITTEST_SUITE_LIST(xCoreUnitTest);
 UNITTEST_SUITE_DECLARE(xCoreUnitTest, xlist);
 UNITTEST_SUITE_DECLARE(xCoreUnitTest, xhashmap);
 UNITTEST_SUITE_DECLARE(xCoreUnitTest, xqueue);
-UNITTEST_SUITE_DECLARE(xCoreUnitTest, xmap);
+UNITTEST_SUITE_DECLARE(xCoreUnitTest, map_t);
 UNITTEST_SUITE_DECLARE(xCoreUnitTest, xpqueue);
 UNITTEST_SUITE_DECLARE(xCoreUnitTest, xstack);
 UNITTEST_SUITE_DECLARE(xCoreUnitTest, xilist);
