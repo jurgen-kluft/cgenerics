@@ -1,6 +1,7 @@
 #include "xbase/x_base.h"
 #include "xbase/x_allocator.h"
 #include "xbase/x_console.h"
+#include "xbase/x_context.h"
 
 #include "xcore/x_core.h"
 
@@ -60,33 +61,47 @@ namespace xcore
 
 		virtual void		release()
 		{
-			mAllocator->release();
 			mAllocator = NULL;
 		}
 	};
 }
 
-xcore::x_iallocator* gTestAllocator = NULL;
+xcore::alloc_t *gTestAllocator = NULL;
+xcore::UnitTestAssertHandler gAssertHandler;
 
 bool gRunUnitTest(UnitTest::TestReporter& reporter)
 {
-	xbase::x_Init();
+	xbase::init();
 
-	xcore::UnitTestAllocator unittestAllocator( xcore::x_iallocator::get_default() );
+#ifdef TARGET_DEBUG
+	xcore::context_t::set_assert_handler(&gAssertHandler);
+#endif
+	xcore::console->write("Configuration: ");
+	xcore::console->setColor(xcore::console_t::YELLOW);
+	xcore::console->writeLine(TARGET_FULL_DESCR_STR);
+	xcore::console->setColor(xcore::console_t::NORMAL);
+
+	xcore::alloc_t* systemAllocator = xcore::context_t::system_alloc();
+	xcore::UnitTestAllocator unittestAllocator( systemAllocator );
 	UnitTest::SetAllocator(&unittestAllocator);
 
-	xcore::TestAllocator testAllocator(xcore::x_iallocator::get_default());
+	xcore::TestAllocator testAllocator(systemAllocator);
 	gTestAllocator = &testAllocator;
+	xcore::context_t::set_system_alloc(&testAllocator);
 
-	xcore::x_Init(gTestAllocator);
 	int r = UNITTEST_SUITE_RUN(reporter, xCoreUnitTest);
-	xcore::x_Exit();
+	if (UnitTest::GetNumAllocations()!=0)
+	{
+		reporter.reportFailure(__FILE__, __LINE__, "xunittest", "memory leaks detected!");
+		r = -1;
+	}
 
 	gTestAllocator->release();
 
 	UnitTest::SetAllocator(NULL);
+	xcore::context_t::set_system_alloc(systemAllocator);
 
-	xbase::x_Exit();
+	xbase::exit();
 	return r==0;
 }
 
