@@ -3,67 +3,68 @@
 #include "xbase/x_console.h"
 #include "xbase/x_context.h"
 
-#include "xcore/x_core.h"
+#include "xunittest/xunittest.h"
+#include "xunittest/private/ut_ReportAssert.h"
 
-#include "xunittest\xunittest.h"
-
-UNITTEST_SUITE_LIST(xCoreUnitTest);
-
-UNITTEST_SUITE_DECLARE(xCoreUnitTest, xlist);
-UNITTEST_SUITE_DECLARE(xCoreUnitTest, xhashmap);
-UNITTEST_SUITE_DECLARE(xCoreUnitTest, xqueue);
-UNITTEST_SUITE_DECLARE(xCoreUnitTest, xmap);
-UNITTEST_SUITE_DECLARE(xCoreUnitTest, xpqueue);
-UNITTEST_SUITE_DECLARE(xCoreUnitTest, xstack);
-UNITTEST_SUITE_DECLARE(xCoreUnitTest, xilist);
-UNITTEST_SUITE_DECLARE(xCoreUnitTest, xset);
-UNITTEST_SUITE_DECLARE(xCoreUnitTest, xtree);
-UNITTEST_SUITE_DECLARE(xCoreUnitTest, xvector);
+UNITTEST_SUITE_LIST(xGenericsUnitTest);
+UNITTEST_SUITE_DECLARE(xGenericsUnitTest, generics);
 
 namespace xcore
 {
-	class UnitTestAllocator : public UnitTest::Allocator
-	{
-		x_iallocator*	mAllocator;
-	public:
-						UnitTestAllocator(x_iallocator* allocator)			{ mAllocator = allocator; }
-		virtual void*	Allocate(size_t size)								{ return mAllocator->allocate(size, 4); }
-		virtual void	Deallocate(void* ptr)								{ mAllocator->deallocate(ptr); }
-	};
+    // Our own assert handler
+    class UnitTestAssertHandler : public xcore::asserthandler_t
+    {
+    public:
+        UnitTestAssertHandler()
+        {
+            NumberOfAsserts = 0;
+        }
 
-	class TestAllocator : public x_iallocator
-	{
-		x_iallocator*		mAllocator;
-	public:
-							TestAllocator(x_iallocator* allocator) : mAllocator(allocator) { }
+        virtual bool	handle_assert(u32& flags, const char* fileName, s32 lineNumber, const char* exprString, const char* messageString)
+        {
+            UnitTest::reportAssert(exprString, fileName, lineNumber);
+            NumberOfAsserts++;
+            return false;
+        }
 
-		virtual const char*	name() const										{ return "xcore unittest test heap allocator"; }
 
-		virtual void*		allocate(xsize_t size, u32 alignment)
-		{
-			UnitTest::IncNumAllocations();
-			return mAllocator->allocate(size, alignment);
-		}
+        xcore::s32		NumberOfAsserts;
+    };
 
-		virtual void*		reallocate(void* mem, xsize_t size, u32 alignment)
-		{
-			if (mem==NULL)
-				return allocate(size, alignment);
-			else 
-				return mAllocator->reallocate(mem, size, alignment);
-		}
+    class UnitTestAllocator : public UnitTest::Allocator
+    {
+        xcore::alloc_t*	mAllocator;
+    public:
+                        UnitTestAllocator(xcore::alloc_t* allocator)	{ mAllocator = allocator; }
+        virtual void*	Allocate(xsize_t size)								{ return mAllocator->allocate((u32)size, sizeof(void*)); }
+        virtual xsize_t	Deallocate(void* ptr)								{ return mAllocator->deallocate(ptr); }
+    };
 
-		virtual void		deallocate(void* mem)
-		{
-			UnitTest::DecNumAllocations();
-			mAllocator->deallocate(mem);
-		}
+    class TestAllocator : public alloc_t
+    {
+        alloc_t*		mAllocator;
+    public:
+                            TestAllocator(alloc_t* allocator) : mAllocator(allocator) { }
 
-		virtual void		release()
-		{
-			mAllocator = NULL;
-		}
-	};
+        virtual const char*	name() const										{ return "xbase unittest test heap allocator"; }
+
+        virtual void*		v_allocate(u32 size, u32 alignment)
+        {
+            UnitTest::IncNumAllocations();
+            return mAllocator->allocate(size, alignment);
+        }
+
+        virtual u32			v_deallocate(void* mem)
+        {
+            UnitTest::DecNumAllocations();
+            return mAllocator->deallocate(mem);
+        }
+
+        virtual void		v_release()
+        {
+            mAllocator = NULL;
+        }
+    };
 }
 
 xcore::alloc_t *gTestAllocator = NULL;
@@ -89,7 +90,7 @@ bool gRunUnitTest(UnitTest::TestReporter& reporter)
 	gTestAllocator = &testAllocator;
 	xcore::context_t::set_system_alloc(&testAllocator);
 
-	int r = UNITTEST_SUITE_RUN(reporter, xCoreUnitTest);
+	int r = UNITTEST_SUITE_RUN(reporter, xGenericsUnitTest);
 	if (UnitTest::GetNumAllocations()!=0)
 	{
 		reporter.reportFailure(__FILE__, __LINE__, "xunittest", "memory leaks detected!");
