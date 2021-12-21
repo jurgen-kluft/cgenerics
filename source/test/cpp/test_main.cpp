@@ -7,7 +7,8 @@
 #include "xunittest/private/ut_ReportAssert.h"
 
 UNITTEST_SUITE_LIST(xGenericsUnitTest);
-UNITTEST_SUITE_DECLARE(xGenericsUnitTest, generics);
+UNITTEST_SUITE_DECLARE(xGenericsUnitTest, vector);
+UNITTEST_SUITE_DECLARE(xGenericsUnitTest, hashmap);
 
 namespace xcore
 {

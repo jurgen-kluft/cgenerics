@@ -34,7 +34,7 @@ map.removev(32);
 map.removei(0);
 
 // So we should use open addressing with the robin-hood insertion policy as well as the fibonacci hash policy.
-// Like: https://github.dev/skarupke/flat_hash_map/blob/master/flat_hash_map.hpp
+// Like: https://github.com/skarupke/flat_hash_map/blob/master/flat_hash_map.hpp
 
 NOTE: It seems that even if the hashmap is resized and as long as we do not do a lookup we could just continue
       inserting and reaching 'old' items should trigger a rehash only for those items that we encounter when
@@ -47,7 +47,7 @@ namespace xcore
 {
     struct fibonacci_hash_policy
     {
-        static constexpr 8 cnumbits = 64;
+        static constexpr u8 cnumbits = 64;
 
         fibonacci_hash_policy()
             : m_shift(cnumbits - 1)
@@ -73,7 +73,7 @@ namespace xcore
     {
         prime_number_hash_policy();
 
-        s32 compare_size_fn(const void* inItem, const void* inData, s32 inIndex)
+        static s32 compare_size_fn(const void* inItem, const void* inData, s32 inIndex)
         {
             u64  value  = *(u64*)inItem;
             u64* values = (u64*)inData;
@@ -101,18 +101,18 @@ namespace xcore
         void commit(u64 new_size) { m_current_prime_size = new_size; }
         void reset() { m_current_prime_size = 0; }
 
-        size_t index_for_hash(size_t hash, size_t /*num_slots_minus_one*/) const { return (hash % m_current_prime_size); }
-        size_t keep_in_range(size_t index, size_t num_slots_minus_one) const { return index > num_slots_minus_one ? (index % m_current_prime_size) : index; }
+        u64 index_for_hash(u64 hash, u64 /*num_slots_minus_one*/) const { return (hash % m_current_prime_size); }
+        u64 keep_in_range(u64 index, u64 num_slots_minus_one) const { return index > num_slots_minus_one ? (index % m_current_prime_size) : index; }
 
     private:
         static u64 const* s_prime_array;
         static s32 const  s_prime_array_len;
-        size_t            m_current_prime_size;
+        u64               m_current_prime_size;
     };
 
-    template <typename Key, typename Value, > class hashmap_t
+    template <typename Key, typename Value, typename HashPolicy = fibonacci_hash_policy> class hashmap_t
     {
-        using hash_policy = fibonacci_hash_policy;
+        using hash_policy = HashPolicy;
 
         static constexpr s8 cmin_lookups = 4;
         static s8           compute_max_lookups(u32 new_num_elements)
@@ -128,7 +128,9 @@ namespace xcore
         // pos = desired position bits
         // age = the age of this entry, to see if it is old
         // empty = this bit markes if the entry is empty
-        template <typename T> struct entry_t
+
+        // template <typename T> // We could make this configurable (u16, u32 or u64)
+        struct entry_t
         {
             entry_t()
                 : m_distance_from_desired(-1)
@@ -172,13 +174,13 @@ namespace xcore
                 return old_distance;
             }
 
-            void emplace(s8 distance, T value)
+            void emplace(s8 distance, u32 value)
             {
                 m_value                 = value;
                 m_distance_from_desired = distance;
             }
 
-            u32 displace(s8 distance, T value)
+            u32 displace(s8 distance, u32 value)
             {
                 u8 const old_value      = m_value & 0x00ffffff;
                 m_value                 = value;
@@ -193,8 +195,8 @@ namespace xcore
         private:
             union
             {
-                s8 m_distance_from_desired;
-                T  m_value;
+                s8  m_distance_from_desired;
+                u32 m_value;
             };
         };
 
@@ -231,10 +233,10 @@ namespace xcore
         }
 
         u32 size() const { return m_num_elements; }
-        u32 max_size() const { return get_cap_max(m_value); }
+        u32 max_size() const { return get_cap_max(m_values); }
         u32 bucket_count() const { return m_num_slots_minus_one ? m_num_slots_minus_one + 1 : 0; }
-        u32 max_bucket_count() const { return (get_cap_max(m_value) - cmin_lookups); }
-        u32 bucket(const Key& key) const { return hash_policy.index_for_hash(hash_object(key), m_num_slots_minus_one); }
+        u32 max_bucket_count() const { return (get_cap_max(m_values) - cmin_lookups); }
+        u32 bucket(const Key& key) const { return m_hash_policy.index_for_hash(hash_object(key), m_num_slots_minus_one); }
         s32 load_factor() const
         {
             u32 buckets = bucket_count();
@@ -258,7 +260,6 @@ namespace xcore
                     return current_entry;
                 }
             }
-            u32 item_index = 0;
 
             // if we need to add a key to the keys darray we also need to add
             // a value to the value darray.
@@ -314,6 +315,8 @@ namespace xcore
                 }
             }
         }
+
+        void grow() { rehash(math::maximum(u64(4), 2 * bucket_count())); }
 
         void rehash(u32 new_num_elements)
         {

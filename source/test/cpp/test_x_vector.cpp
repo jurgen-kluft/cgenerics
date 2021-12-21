@@ -9,18 +9,12 @@ using namespace xcore;
 
 extern xcore::alloc_t* gTestAllocator;
 
-UNITTEST_SUITE_BEGIN(generics)
+UNITTEST_SUITE_BEGIN(vector)
 {
     UNITTEST_FIXTURE(main)
     {
         UNITTEST_FIXTURE_SETUP() {}
         UNITTEST_FIXTURE_TEARDOWN() {}
-
-        UNITTEST_TEST(test_hash_map_t)
-        {
-            //hash_map_t<s32, s32> hm;
-
-        }
 
         UNITTEST_TEST(vector_t)
         {
