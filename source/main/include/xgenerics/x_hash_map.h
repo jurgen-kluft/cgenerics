@@ -6,859 +6,464 @@
 #endif
 
 #include "xbase/x_allocator.h"
+#include "xbase/x_binary_search.h"
+#include "xbase/x_darray.h"
 #include "xbase/x_hash.h"
 #include "xbase/x_math.h"
 
-#if 0
+/*
+We want a hash map that doesn't have to care about the types of the key and value. It only should be able to
+compute the hash of the key and compare a value with another value.
+The hash map should only store information related to its purpose which is to quickly check if a key is contained
+in the map and to retrieve the value belonging to a key.
+Also a reallocation (like in-place growing or when using virtual memory darray's) should be able to work.
 
-#include "xgenerics/x_vector.h"
+s32* keys = darray_create<s32>(0, 4096, 16*65536);
+s32* values = darray_create<s32>(0, 4096, 16*65536);
+u32* meta = darray_create<u32>(0, 4096, 16*65536);     // top 5 bits are used for the ll, 27 bits are for the number of items (2^27 = 128 Million items )
+
+map = hashmap_t<s32,s32>(keys, values, meta);
+map = hashmap_t<s32,s32>(); // create the keys, values and meta darray's ourselves
+map.inserti_range(0, 4096); // // index based range insertion, key and value index are identical
+
+map.insertv(32, 100);  // value based insertion key/value, if key/value is not found it will be added to the backed storage
+map.inserti(0); // index based insertion, key/value index, actual key/value are already in the darray storage
+
+map.findv(32);
+map.removev(32);
+map.removei(0);
+
+// So we should use open addressing with the robin-hood insertion policy as well as the fibonacci hash policy.
+// Like: https://github.dev/skarupke/flat_hash_map/blob/master/flat_hash_map.hpp
+
+NOTE: It seems that even if the hashmap is resized and as long as we do not do a lookup we could just continue
+      inserting and reaching 'old' items should trigger a rehash only for those items that we encounter when
+      re-inserting.
+      This could be a nice speedup when inserting. Once we do a lookup and we still have 'old' items we should
+      rehash only those.
+*/
 
 namespace xcore
 {
-    template <typename T> struct bit_hasher_t
+    struct fibonacci_hash_policy
     {
-        inline xsize_t operator()(const T& key) const { return static_cast<xsize_t>(fast_hash(&key, sizeof(key))); }
-    };
+        static constexpr 8 cnumbits = 64;
 
-    template <typename T> struct equal_to
-    {
-        inline bool operator()(const T& a, const T& b) const { return a == b; }
-    };
-
-    // Important: The Hasher and Equals objects must be bitwise movable!
-    template <typename Key, typename Value = empty_type_t, typename Hasher = hasher_t<Key>, typename Equals = equal_to<Key>> class hash_map_t
-    {
-        friend class iterator;
-        friend class const_iterator;
-
-        enum state
-        {
-            cStateInvalid = 0,
-            cStateValid   = 1
-        };
-
-        enum
-        {
-            cMinHashSize = 4U
-        };
-
-    public:
-        template <typename K, typename V> class pair_t
-        {
-        public:
-            K first;
-            V second;
-        };
-
-        typedef hash_map_t<Key, Value, Hasher, Equals> hash_map_type;
-        typedef pair_t<Key, Value>                     value_type;
-        typedef Key                                    key_type;
-        typedef Value                                  referent_type;
-        typedef Hasher                                 hasher_type;
-        typedef Equals                                 equals_type;
-
-        hash_map_t()
-            : m_hash_shift(32)
-            , m_num_valid(0)
-            , m_grow_threshold(0)
+        fibonacci_hash_policy()
+            : m_shift(cnumbits - 1)
         {
         }
 
-        hash_map_t(const hash_map_t& other)
-            : m_values(other.m_values)
-            , m_hash_shift(other.m_hash_shift)
-            , m_hasher(other.m_hasher)
-            , m_equals(other.m_equals)
-            , m_num_valid(other.m_num_valid)
-            , m_grow_threshold(other.m_grow_threshold)
+        u64  index_for_hash(u64 hash, u64 /*m_num_slots_minus_one*/) const { return (11400714819323198485ull * hash) >> m_shift; }
+        u64  keep_in_range(u64 index, u64 m_num_slots_minus_one) const { return index & m_num_slots_minus_one; }
+        void commit(u64 shift) { m_shift = shift; }
+        void reset() { m_shift = cnumbits - 1; }
+
+        u64 next_size_over(u64& size) const
         {
-        }
-
-        hash_map_t& operator=(const hash_map_t& other)
-        {
-            if (this == &other)
-                return *this;
-
-            clear();
-
-            m_values         = other.m_values;
-            m_hash_shift     = other.m_hash_shift;
-            m_num_valid      = other.m_num_valid;
-            m_grow_threshold = other.m_grow_threshold;
-            m_hasher         = other.m_hasher;
-            m_equals         = other.m_equals;
-
-            return *this;
-        }
-
-        inline ~hash_map_t() { clear(); }
-
-        const Equals& get_equals() const { return m_equals; }
-        Equals&       get_equals() { return m_equals; }
-
-        void set_equals(const Equals& equals) { m_equals = equals; }
-
-        const Hasher& get_hasher() const { return m_hasher; }
-        Hasher&       get_hasher() { return m_hasher; }
-
-        void set_hasher(const Hasher& hasher) { m_hasher = hasher; }
-
-        inline void clear()
-        {
-            if (!m_values.empty())
-            {
-                if (XCORE_HAS_DESTRUCTOR(Key) || XCORE_HAS_DESTRUCTOR(Value))
-                {
-                    node* p     = &get_node(0);
-                    node* p_end = p + m_values.size();
-
-                    u32 num_remaining = m_num_valid;
-                    while (p != p_end)
-                    {
-                        if (p->state)
-                        {
-                            destruct_value_type(p);
-                            num_remaining--;
-                            if (!num_remaining)
-                                break;
-                        }
-
-                        p++;
-                    }
-                }
-
-                m_values.clear_no_destruction();
-
-                m_hash_shift     = 32;
-                m_num_valid      = 0;
-                m_grow_threshold = 0;
-            }
-        }
-
-        inline void reset()
-        {
-            if (!m_num_valid)
-                return;
-
-            if (XCORE_HAS_DESTRUCTOR(Key) || XCORE_HAS_DESTRUCTOR(Value))
-            {
-                node* p     = &get_node(0);
-                node* p_end = p + m_values.size();
-
-                u32 num_remaining = m_num_valid;
-                while (p != p_end)
-                {
-                    if (p->state)
-                    {
-                        destruct_value_type(p);
-                        p->state = cStateInvalid;
-
-                        num_remaining--;
-                        if (!num_remaining)
-                            break;
-                    }
-
-                    p++;
-                }
-            }
-            else if (sizeof(node) <= 32)
-            {
-                memset(&m_values[0], 0, m_values.size_in_bytes());
-            }
-            else
-            {
-                node* p     = &get_node(0);
-                node* p_end = p + m_values.size();
-
-                u32 num_remaining = m_num_valid;
-                while (p != p_end)
-                {
-                    if (p->state)
-                    {
-                        p->state = cStateInvalid;
-
-                        num_remaining--;
-                        if (!num_remaining)
-                            break;
-                    }
-
-                    p++;
-                }
-            }
-
-            m_num_valid = 0;
-        }
-
-        inline u32  size() { return m_num_valid; }
-        inline u32  get_table_size() { return m_values.size(); }
-        inline bool empty() { return !m_num_valid; }
-        inline void reserve(u32 new_capacity)
-        {
-            u32 new_hash_size = math::maximum(1U, new_capacity);
-
-            new_hash_size = new_hash_size * 2U;
-
-            if (!math::is_power_of_2(new_hash_size))
-                new_hash_size = math::next_pow2(new_hash_size);
-
-            new_hash_size = math::maximum<u32>(cMinHashSize, new_hash_size);
-
-            if (new_hash_size > m_values.size())
-                rehash(new_hash_size);
-        }
-
-        class const_iterator;
-
-        class iterator
-        {
-            friend class hash_map_t<Key, Value, Hasher, Equals>;
-            friend class hash_map_t<Key, Value, Hasher, Equals>::const_iterator;
-
-        public:
-            inline iterator()
-                : m_pTable(NULL)
-                , m_index(0)
-            {
-            }
-            inline iterator(hash_map_type& table, u32 index)
-                : m_pTable(&table)
-                , m_index(index)
-            {
-            }
-            inline iterator(const iterator& other)
-                : m_pTable(other.m_pTable)
-                , m_index(other.m_index)
-            {
-            }
-
-            inline iterator& operator=(const iterator& other)
-            {
-                m_pTable = other.m_pTable;
-                m_index  = other.m_index;
-                return *this;
-            }
-
-            // post-increment
-            inline iterator operator++(s32)
-            {
-                iterator result(*this);
-                ++*this;
-                return result;
-            }
-
-            // pre-increment
-            inline iterator& operator++()
-            {
-                probe();
-                return *this;
-            }
-
-            inline value_type& operator*() const { return *get_cur(); }
-            inline value_type* operator->() const { return get_cur(); }
-
-            inline bool operator==(const iterator& b) const { return (m_pTable == b.m_pTable) && (m_index == b.m_index); }
-            inline bool operator!=(const iterator& b) const { return !(*this == b); }
-            inline bool operator==(const const_iterator& b) const { return (m_pTable == b.m_pTable) && (m_index == b.m_index); }
-            inline bool operator!=(const const_iterator& b) const { return !(*this == b); }
-
-        private:
-            hash_map_type* m_pTable;
-            u32            m_index;
-
-            inline value_type* get_cur() const
-            {
-                XCORE_ASSERT(m_pTable && (m_index < m_pTable->m_values.size()));
-                XCORE_ASSERT(m_pTable->get_node_state(m_index) == cStateValid);
-
-                return &m_pTable->get_node(m_index);
-            }
-
-            inline void probe()
-            {
-                XCORE_ASSERT(m_pTable);
-                m_index = m_pTable->find_next(m_index);
-            }
-        };
-
-        class const_iterator
-        {
-            friend class hash_map_t<Key, Value, Hasher, Equals>;
-            friend class hash_map_t<Key, Value, Hasher, Equals>::iterator;
-
-        public:
-            inline const_iterator()
-                : m_pTable(NULL)
-                , m_index(0)
-            {
-            }
-            inline const_iterator(const hash_map_type& table, u32 index)
-                : m_pTable(&table)
-                , m_index(index)
-            {
-            }
-            inline const_iterator(const iterator& other)
-                : m_pTable(other.m_pTable)
-                , m_index(other.m_index)
-            {
-            }
-            inline const_iterator(const const_iterator& other)
-                : m_pTable(other.m_pTable)
-                , m_index(other.m_index)
-            {
-            }
-
-            inline const_iterator& operator=(const const_iterator& other)
-            {
-                m_pTable = other.m_pTable;
-                m_index  = other.m_index;
-                return *this;
-            }
-
-            inline const_iterator& operator=(const iterator& other)
-            {
-                m_pTable = other.m_pTable;
-                m_index  = other.m_index;
-                return *this;
-            }
-
-            // post-increment
-            inline const_iterator operator++(s32)
-            {
-                const_iterator result(*this);
-                ++*this;
-                return result;
-            }
-
-            // pre-increment
-            inline const_iterator& operator++()
-            {
-                probe();
-                return *this;
-            }
-
-            inline const value_type& operator*() const { return *get_cur(); }
-            inline const value_type* operator->() const { return get_cur(); }
-
-            inline bool operator==(const const_iterator& b) const { return (m_pTable == b.m_pTable) && (m_index == b.m_index); }
-            inline bool operator!=(const const_iterator& b) const { return !(*this == b); }
-            inline bool operator==(const iterator& b) const { return (m_pTable == b.m_pTable) && (m_index == b.m_index); }
-            inline bool operator!=(const iterator& b) const { return !(*this == b); }
-
-        private:
-            const hash_map_type* m_pTable;
-            u32                  m_index;
-
-            inline const value_type* get_cur() const
-            {
-                XCORE_ASSERT(m_pTable && (m_index < m_pTable->m_values.size()));
-                XCORE_ASSERT(m_pTable->get_node_state(m_index) == cStateValid);
-
-                return &m_pTable->get_node(m_index);
-            }
-
-            inline void probe()
-            {
-                XCORE_ASSERT(m_pTable);
-                m_index = m_pTable->find_next(m_index);
-            }
-        };
-
-        inline const_iterator begin() const
-        {
-            if (!m_num_valid)
-                return end();
-
-            return const_iterator(*this, find_next(-1));
-        }
-
-        inline const_iterator end() const { return const_iterator(*this, m_values.size()); }
-
-        inline iterator begin()
-        {
-            if (!m_num_valid)
-                return end();
-
-            return iterator(*this, find_next(-1));
-        }
-
-        inline iterator end() { return iterator(*this, m_values.size()); }
-
-        // insert_result.first will always pos32 to inserted key/value (or the already
-        // existing key/value). insert_resutt.second will be true if a new key/value
-        // was inserted, or false if the key already existed (in which case first will
-        // pos32 to the already existing value).
-        typedef pair_t<iterator, bool> insert_result;
-
-        inline insert_result insert(const Key& k, const Value& v = Value())
-        {
-            insert_result result;
-            if (!insert_no_grow(result, k, v))
-            {
-                grow();
-
-                // This must succeed.
-                if (!insert_no_grow(result, k, v))
-                {
-                    XCORE_FAIL("insert() failed");
-                }
-            }
-
-            return result;
-        }
-
-        inline insert_result insert(const value_type& v) { return insert(v.first, v.second); }
-
-        inline const_iterator find(const Key& k) const { return const_iterator(*this, find_index(k)); }
-
-        inline iterator find(const Key& k) { return iterator(*this, find_index(k)); }
-
-        inline bool erase(const Key& k)
-        {
-            s32 i = find_index(k);
-
-            if (i >= static_cast<s32>(m_values.size()))
-                return false;
-
-            node* pDst = &get_node(i);
-            destruct_value_type(pDst);
-            pDst->state = cStateInvalid;
-
-            m_num_valid--;
-
-            for (;;)
-            {
-                s32 r, j = i;
-
-                node* pSrc = pDst;
-
-                do
-                {
-                    if (!i)
-                    {
-                        i    = m_values.size() - 1;
-                        pSrc = &get_node(i);
-                    }
-                    else
-                    {
-                        i--;
-                        pSrc--;
-                    }
-
-                    if (!pSrc->state)
-                        return true;
-
-                    r = hash_key(pSrc->first);
-
-                } while ((i <= r && r < j) || (r < j && j < i) || (j < i && i <= r));
-
-                move_node(pDst, pSrc);
-
-                pDst = pSrc;
-            }
-        }
-
-        inline void swap(hash_map_type& other)
-        {
-            m_values.swap(other.m_values);
-            utils::swap(m_hash_shift, other.m_hash_shift);
-            utils::swap(m_num_valid, other.m_num_valid);
-            utils::swap(m_grow_threshold, other.m_grow_threshold);
-            utils::swap(m_hasher, other.m_hasher);
-            utils::swap(m_equals, other.m_equals);
+            size = math::maximum(u64(2), math::next_power_of_two(size));
+            return (u64)cnumbits - math::log2(size);
         }
 
     private:
-        struct node : public value_type
-        {
-            u32 state;
-        };
-
-        static inline void construct_value_type(value_type* pDst, const Key& k, const Value& v)
-        {
-            if (XCORE_IS_BITWISE_COPYABLE(Key))
-                memcpy(&pDst->first, &k, sizeof(Key));
-            else
-                scalar_type<Key>::construct(&pDst->first, k);
-
-            if (XCORE_IS_BITWISE_COPYABLE(Value))
-                memcpy(&pDst->second, &v, sizeof(Value));
-            else
-                scalar_type<Value>::construct(&pDst->second, v);
-        }
-
-        static inline void construct_value_type(value_type* pDst, const value_type* pSrc)
-        {
-            if ((XCORE_IS_BITWISE_COPYABLE(Key)) && (XCORE_IS_BITWISE_COPYABLE(Value)))
-            {
-                memcpy(pDst, pSrc, sizeof(value_type));
-            }
-            else
-            {
-                if (XCORE_IS_BITWISE_COPYABLE(Key))
-                    memcpy(&pDst->first, &pSrc->first, sizeof(Key));
-                else
-                    scalar_type<Key>::construct(&pDst->first, pSrc->first);
-
-                if (XCORE_IS_BITWISE_COPYABLE(Value))
-                    memcpy(&pDst->second, &pSrc->second, sizeof(Value));
-                else
-                    scalar_type<Value>::construct(&pDst->second, pSrc->second);
-            }
-        }
-
-        static inline void destruct_value_type(value_type* p)
-        {
-            scalar_type<Key>::destruct(&p->first);
-            scalar_type<Value>::destruct(&p->second);
-        }
-
-        // Moves *pSrc to *pDst efficiently.
-        // pDst should NOT be constructed on entry.
-        static inline void move_node(node* pDst, node* pSrc)
-        {
-            XCORE_ASSERT(!pDst->state);
-
-            if (XCORE_IS_BITWISE_COPYABLE_OR_MOVABLE(Key) && XCORE_IS_BITWISE_COPYABLE_OR_MOVABLE(Value))
-            {
-                memcpy(pDst, pSrc, sizeof(node));
-            }
-            else
-            {
-                if (XCORE_IS_BITWISE_COPYABLE_OR_MOVABLE(Key))
-                    memcpy(&pDst->first, &pSrc->first, sizeof(Key));
-                else
-                {
-                    scalar_type<Key>::construct(&pDst->first, pSrc->first);
-                    scalar_type<Key>::destruct(&pSrc->first);
-                }
-
-                if (XCORE_IS_BITWISE_COPYABLE_OR_MOVABLE(Value))
-                    memcpy(&pDst->second, &pSrc->second, sizeof(Value));
-                else
-                {
-                    scalar_type<Value>::construct(&pDst->second, pSrc->second);
-                    scalar_type<Value>::destruct(&pSrc->second);
-                }
-
-                pDst->state = cStateValid;
-            }
-
-            pSrc->state = cStateInvalid;
-        }
-
-        struct raw_node
-        {
-            inline raw_node()
-            {
-                node* p  = res32erpret_cast<node*>(this);
-                p->state = cStateInvalid;
-            }
-
-            inline ~raw_node()
-            {
-                node* p = res32erpret_cast<node*>(this);
-                if (p->state)
-                    hash_map_type::destruct_value_type(p);
-            }
-
-            inline raw_node(const raw_node& other)
-            {
-                node*       pDst = res32erpret_cast<node*>(this);
-                const node* pSrc = res32erpret_cast<const node*>(&other);
-
-                if (pSrc->state)
-                {
-                    hash_map_type::construct_value_type(pDst, pSrc);
-                    pDst->state = cStateValid;
-                }
-                else
-                    pDst->state = cStateInvalid;
-            }
-
-            inline raw_node& operator=(const raw_node& rhs)
-            {
-                if (this == &rhs)
-                    return *this;
-
-                node*       pDst = res32erpret_cast<node*>(this);
-                const node* pSrc = res32erpret_cast<const node*>(&rhs);
-
-                if (pSrc->state)
-                {
-                    if (pDst->state)
-                    {
-                        pDst->first  = pSrc->first;
-                        pDst->second = pSrc->second;
-                    }
-                    else
-                    {
-                        hash_map_type::construct_value_type(pDst, pSrc);
-                        pDst->state = cStateValid;
-                    }
-                }
-                else if (pDst->state)
-                {
-                    hash_map_type::destruct_value_type(pDst);
-                    pDst->state = cStateInvalid;
-                }
-
-                return *this;
-            }
-
-            u32 m_bits[sizeof(node)];
-        };
-
-        typedef vector<raw_node> node_vector;
-
-        node_vector m_values;
-        u32         m_hash_shift;
-
-        Hasher m_hasher;
-        Equals m_equals;
-
-        u32 m_num_valid;
-
-        u32 m_grow_threshold;
-
-        inline s32 hash_key(const Key& k) const
-        {
-            XCORE_ASSERT((1U << (32U - m_hash_shift)) == m_values.size());
-
-            u32 hash = static_cast<u32>(m_hasher(k));
-
-            // Fibonacci hashing
-            hash = (2654435769U * hash) >> m_hash_shift;
-
-            XCORE_ASSERT(hash < m_values.size());
-            return hash;
-        }
-
-        inline const node& get_node(u32 index) const { return *res32erpret_cast<const node*>(&m_values[index]); }
-
-        inline node& get_node(u32 index) { return *res32erpret_cast<node*>(&m_values[index]); }
-
-        inline state get_node_state(u32 index) const { return static_cast<state>(get_node(index).state); }
-
-        inline void set_node_state(u32 index, bool valid) { get_node(index).state = valid; }
-
-        inline void grow() { rehash(math::maximum<u32>(cMinHashSize, m_values.size() * 2U)); }
-
-        inline void rehash(u32 new_hash_size)
-        {
-            XCORE_ASSERT(new_hash_size >= m_num_valid);
-            XCORE_ASSERT(math::is_power_of_2(new_hash_size));
-
-            if ((new_hash_size < m_num_valid) || (new_hash_size == m_values.size()))
-                return;
-
-            hash_map_t new_map;
-            new_map.m_values.resize(new_hash_size);
-            new_map.m_hash_shift = 32U - math::floor_log2i(new_hash_size);
-            XCORE_ASSERT(new_hash_size == (1U << (32U - new_map.m_hash_shift)));
-            new_map.m_grow_threshold = UINT_MAX;
-
-            node* pNode     = res32erpret_cast<node*>(m_values.begin());
-            node* pNode_end = pNode + m_values.size();
-
-            while (pNode != pNode_end)
-            {
-                if (pNode->state)
-                {
-                    new_map.move_s32o(pNode);
-
-                    if (new_map.m_num_valid == m_num_valid)
-                        break;
-                }
-
-                pNode++;
-            }
-
-            new_map.m_grow_threshold = (new_hash_size + 1U) >> 1U;
-
-            m_values.clear_no_destruction();
-            m_hash_shift = 32;
-
-            swap(new_map);
-        }
-
-        inline u32 find_next(s32 index) const
-        {
-            index++;
-
-            if (index >= static_cast<s32>(m_values.size()))
-                return index;
-
-            const node* pNode = &get_node(index);
-
-            for (;;)
-            {
-                if (pNode->state)
-                    break;
-
-                if (++index >= static_cast<s32>(m_values.size()))
-                    break;
-
-                pNode++;
-            }
-
-            return index;
-        }
-
-        inline u32 find_index(const Key& k) const
-        {
-            if (m_num_valid)
-            {
-                s32         index = hash_key(k);
-                const node* pNode = &get_node(index);
-
-                if (pNode->state)
-                {
-                    if (m_equals(pNode->first, k))
-                        return index;
-
-                    const s32 orig_index = index;
-
-                    for (;;)
-                    {
-                        if (!index)
-                        {
-                            index = m_values.size() - 1;
-                            pNode = &get_node(index);
-                        }
-                        else
-                        {
-                            index--;
-                            pNode--;
-                        }
-
-                        if (index == orig_index)
-                            break;
-
-                        if (!pNode->state)
-                            break;
-
-                        if (m_equals(pNode->first, k))
-                            return index;
-                    }
-                }
-            }
-
-            return m_values.size();
-        }
-
-        inline bool insert_no_grow(insert_result& result, const Key& k, const Value& v = Value())
-        {
-            if (!m_values.size())
-                return false;
-
-            s32   index = hash_key(k);
-            node* pNode = &get_node(index);
-
-            if (pNode->state)
-            {
-                if (m_equals(pNode->first, k))
-                {
-                    result.first  = iterator(*this, index);
-                    result.second = false;
-                    return true;
-                }
-
-                const s32 orig_index = index;
-
-                for (;;)
-                {
-                    if (!index)
-                    {
-                        index = m_values.size() - 1;
-                        pNode = &get_node(index);
-                    }
-                    else
-                    {
-                        index--;
-                        pNode--;
-                    }
-
-                    if (orig_index == index)
-                        return false;
-
-                    if (!pNode->state)
-                        break;
-
-                    if (m_equals(pNode->first, k))
-                    {
-                        result.first  = iterator(*this, index);
-                        result.second = false;
-                        return true;
-                    }
-                }
-            }
-
-            if (m_num_valid >= m_grow_threshold)
-                return false;
-
-            construct_value_type(pNode, k, v);
-
-            pNode->state = cStateValid;
-
-            m_num_valid++;
-            XCORE_ASSERT(m_num_valid <= m_values.size());
-
-            result.first  = iterator(*this, index);
-            result.second = true;
-
-            return true;
-        }
-
-        inline void move_s32o(node* pNode)
-        {
-            s32   index     = hash_key(pNode->first);
-            node* pDst_node = &get_node(index);
-
-            if (pDst_node->state)
-            {
-                const s32 orig_index = index;
-
-                for (;;)
-                {
-                    if (!index)
-                    {
-                        index     = m_values.size() - 1;
-                        pDst_node = &get_node(index);
-                    }
-                    else
-                    {
-                        index--;
-                        pDst_node--;
-                    }
-
-                    if (index == orig_index)
-                    {
-                        XCORE_ASSERT(false);
-                        return;
-                    }
-
-                    if (!pDst_node->state)
-                        break;
-                }
-            }
-
-            move_node(pDst_node, pNode);
-
-            m_num_valid++;
-        }
+        u64 m_shift;
     };
 
-    template <typename Key, typename Value, typename Hasher, typename Equals> struct bitwise_movable<hash_map_t<Key, Value, Hasher, Equals>>
+    struct prime_number_hash_policy
     {
-        enum
+        prime_number_hash_policy();
+
+        s32 compare_size_fn(const void* inItem, const void* inData, s32 inIndex)
         {
-            cFlag = true
-        };
+            u64  value  = *(u64*)inItem;
+            u64* values = (u64*)inData;
+            if (value < values[inIndex])
+                return -1;
+            if (value > values[inIndex])
+                return -1;
+            return 0;
+        }
+
+        u64 next_size_over(u64& size) const
+        {
+            // prime numbers generated by the following method:
+            // 1. start with a prime p = 2
+            // 2. go to wolfram alpha and get p = NextPrime(2 * p)
+            // 3. repeat 2. until you overflow 64 bits
+            // you now have large gaps which you would hit if somebody called reserve() with an unlucky number.
+            // 4. to fill the gaps for every prime p go to wolfram alpha and get ClosestPrime(p * 2^(1/3)) and ClosestPrime(p * 2^(2/3)) and put those in the gaps
+            // 5. get PrevPrime(2^64) and put it at the end
+
+            u32 index = x_LowerBound(&size, s_prime_array, s_prime_array_len * sizeof(u64), compare_size_fn);
+            size      = s_prime_array[index];
+            return size;
+        }
+        void commit(u64 new_size) { m_current_prime_size = new_size; }
+        void reset() { m_current_prime_size = 0; }
+
+        size_t index_for_hash(size_t hash, size_t /*num_slots_minus_one*/) const { return (hash % m_current_prime_size); }
+        size_t keep_in_range(size_t index, size_t num_slots_minus_one) const { return index > num_slots_minus_one ? (index % m_current_prime_size) : index; }
+
+    private:
+        static u64 const* s_prime_array;
+        static s32 const  s_prime_array_len;
+        size_t            m_current_prime_size;
     };
 
-    template <typename Key, typename Value, typename Hasher, typename Equals> inline void swap(hash_map_t<Key, Value, Hasher, Equals>& a, hash_map_t<Key, Value, Hasher, Equals>& b) { a.swap(b); }
-} // namespace xcore
+    template <typename Key, typename Value, > class hashmap_t
+    {
+        using hash_policy = fibonacci_hash_policy;
 
-#endif
+        static constexpr s8 cmin_lookups = 4;
+        static s8           compute_max_lookups(u32 new_num_elements)
+        {
+            s8 desired = math::log2(new_num_elements);
+            return math::maximum(cmin_lookups, desired);
+        }
+
+        // layout:
+        // +-------|-------|-------|-------|-------|-------|-------|-------|
+        // | empty | age1  | age0  |  pos4 |  pos3 |  pos2 |  pos1 |  pos0 |
+        // +-------|-------|-------|-------|-------|-------|-------|-------|
+        // pos = desired position bits
+        // age = the age of this entry, to see if it is old
+        // empty = this bit markes if the entry is empty
+        template <typename T> struct entry_t
+        {
+            entry_t()
+                : m_distance_from_desired(-1)
+            {
+            }
+            entry_t(s8 distance_from_desired)
+                : m_distance_from_desired(distance_from_desired)
+            {
+            }
+            ~entry_t() {}
+
+            static entry_t* empty_default_table()
+            {
+                static entry_t result[cmin_lookups] = {{}, {}, {}, {cspecial_end_value}};
+                return result;
+            }
+
+            bool is_empty() const { return m_distance_from_desired < 0; }
+            bool is_old() const
+            {
+                u8 age = m_distance_from_desired & 0x70;
+                return age == 0x6;
+            }
+            void set_old() { m_distance_from_desired = (m_distance_from_desired & 0x9F) | 0x6; }
+
+            bool has_value() const { return m_distance_from_desired >= 0; }
+            u32  value() const { return m_value & 0x00ffffff; }
+            u32  value(u32 value)
+            {
+                u32 old_value = m_value & 0x00ffffff;
+                m_value       = (m_value & 0xff000000) | (value & 0x00ffffff);
+                return old_value;
+            }
+
+            bool is_at_desired_position() const { return m_distance_from_desired <= 0; }
+            u8   desired_position() const { return m_distance_from_desired & 0x1f; }
+            u8   desired_position(u8 desired)
+            {
+                u8 old_distance         = m_distance_from_desired;
+                m_distance_from_desired = desired;
+                return old_distance;
+            }
+
+            void emplace(s8 distance, T value)
+            {
+                m_value                 = value;
+                m_distance_from_desired = distance;
+            }
+
+            u32 displace(s8 distance, T value)
+            {
+                u8 const old_value      = m_value & 0x00ffffff;
+                m_value                 = value;
+                m_distance_from_desired = distance;
+                return old_value;
+            }
+
+            void destroy_value() { m_value = -1; }
+
+            static constexpr s8 cspecial_end_value = 0;
+
+        private:
+            union
+            {
+                s8 m_distance_from_desired;
+                T  m_value;
+            };
+        };
+
+        Key*        m_keys;
+        Value*      m_values;
+        entry_t*    m_meta;
+        u64         m_num_elements;
+        u64         m_num_slots_minus_one;
+        s8          m_max_lookups = cmin_lookups - 1;
+        u64         m_max_load_factor; // ~980 == 98%
+        hash_policy m_hash_policy;
+
+    public:
+        hashmap_t(Key* keys, Value* values) {}
+
+        inline Value& operator[](const Key& key)
+        {
+            u32 const slot = bucket(key);
+            bool      newlyadded;
+            entry_t*  entry = emplace(-1, &key, slot, newlyadded);
+            return m_values + entry->value();
+        }
+
+        inline Value* operator[](const Key& key) const
+        {
+            Value* found = this->find(key);
+            return found;
+        }
+
+        const Value& at(const Key& key) const
+        {
+            Value* found = this->find(key);
+            return found;
+        }
+
+        u32 size() const { return m_num_elements; }
+        u32 max_size() const { return get_cap_max(m_value); }
+        u32 bucket_count() const { return m_num_slots_minus_one ? m_num_slots_minus_one + 1 : 0; }
+        u32 max_bucket_count() const { return (get_cap_max(m_value) - cmin_lookups); }
+        u32 bucket(const Key& key) const { return hash_policy.index_for_hash(hash_object(key), m_num_slots_minus_one); }
+        s32 load_factor() const
+        {
+            u32 buckets = bucket_count();
+            if (buckets)
+                return (m_num_elements << 10) / bucket_count() / 10;
+            else
+                return 0;
+        }
+        void max_load_factor(s8 percentage) { m_max_load_factor = percentage * 10; }
+        s32  max_load_factor() const { return m_max_load_factor / 10; }
+
+        entry_t* emplace(s32 item_index, Key* item_key, u32 slot, bool& out_newlyadded)
+        {
+            entry_t* current_entry         = m_meta + slot;
+            s8       distance_from_desired = 0;
+            for (; current_entry->distance_from_desired >= distance_from_desired; ++current_entry, ++distance_from_desired)
+            {
+                if (compares_equal(*item_key, m_keys + current_entry->value()))
+                {
+                    out_newlyadded = false;
+                    return current_entry;
+                }
+            }
+            u32 item_index = 0;
+
+            // if we need to add a key to the keys darray we also need to add
+            // a value to the value darray.
+
+            out_newlyadded = true;
+            return emplace_new_key(distance_from_desired, current_entry, item_index, out_newlyadded);
+        }
+
+        entry_t* emplace_new_key(s8 distance_from_desired, entry_t* current_entry, u32 item_index, bool& out_newlyadded)
+        {
+            if (m_num_slots_minus_one == 0 || distance_from_desired == m_max_lookups || ((m_num_elements + 1) > (((m_num_slots_minus_one + 1) << 10) / m_max_load_factor)))
+            {
+                grow();
+                return emplace(item_index, out_newlyadded);
+            }
+            else if (current_entry->is_empty())
+            {
+                current_entry->emplace(distance_from_desired, item_index);
+                ++num_elements;
+                out_newlyadded = true;
+                return current_entry;
+            }
+            u32 to_insert = item_index;
+
+            distance_from_desired = current_entry->distance_from_desired(distance_from_desired);
+            to_insert             = current_entry->value(to_insert);
+
+            entry_t* result = current_entry;
+            for (++distance_from_desired, ++current_entry;; ++current_entry)
+            {
+                if (current_entry->is_empty())
+                {
+                    current_entry->emplace(distance_from_desired, to_insert);
+                    ++num_elements;
+                    out_newlyadded = true;
+                    return result;
+                }
+                else if (current_entry->distance_from_desired < distance_from_desired)
+                {
+                    distance_from_desired = current_entry->distance_from_desired(distance_from_desired);
+                    to_insert             = current_entry->value(to_insert);
+                    ++distance_from_desired;
+                }
+                else
+                {
+                    ++distance_from_desired;
+                    if (distance_from_desired == max_lookups)
+                    {
+                        to_insert = result->value(to_insert);
+                        grow();
+                        return emplace(to_insert, out_newlyadded);
+                    }
+                }
+            }
+        }
+
+        void rehash(u32 new_num_elements)
+        {
+            new_num_elements = math::maximum(new_num_elements, ((m_num_elements << 10) / m_max_load_factor));
+            if (new_num_elements == 0)
+            {
+                reset_to_empty_state();
+                return;
+            }
+
+            do
+            {
+                auto new_prime_index = hash_policy.next_size_over(new_num_elements);
+                if (new_num_elements == bucket_count())
+                    return;
+                s8 new_max_lookups = compute_max_lookups(new_num_elements);
+
+                // re-allocate (might not do anything except commit virtual memory pages)
+                set_cap<entry_t>(m_meta, new_num_elements + new_max_lookups);
+
+                // in-place rehashing
+                entry_t* it     = m_meta;
+                entry_t* it_end = m_meta + m_num_elements;
+                while (it < it_end)
+                {
+                    it->set_old();
+                    ++it;
+                }
+                it_end = m_meta + new_num_elements;
+                while (it < it_end)
+                {
+                    it->set_empty();
+                    ++it;
+                }
+
+                entry_t* special_end_item = m_meta + (num_buckets + new_max_lookups);
+                special_end_item->set_distance_from_desired(entry_t::cspecial_end_value);
+
+                x_swap(m_num_slots_minus_one, new_num_elements);
+                --m_num_slots_minus_one;
+
+                m_hash_policy.commit(new_prime_index);
+
+                s8 old_max_lookups = max_lookups;
+                max_lookups        = new_max_lookups;
+                m_num_elements     = 0;
+                u64 end            = (new_num_elements + old_max_lookups);
+                for (u64 i = 0; i < end; i++)
+                {
+                    entry_t* it = m_meta + i;
+                    if (it->is_old() && it->has_value())
+                    {
+                        // to be re-hashed and re-inserted
+                        do
+                        {
+                            Key*      prev_key  = m_keys + it->value();
+                            u32 const prev_slot = bucket(prev_key);
+                            entry_t*  prev      = displace(it->value(), prev_slot, grow);
+                            if (grow)
+                            {
+                                // ouch, we reached a situation where we did not resize enough.
+                                // We still have a key slot that reaches 'm_max_lookups', better
+                                // resize again to get out of this situation.
+                                continue;
+                            }
+                            it = prev;
+                        } while (it != nullptr);
+                    }
+                }
+            } while (true);
+        }
+
+        entry_t* displace(s32 item_index, u32 slot, bool& grow)
+        {
+            s8 distance_from_desired = 0;
+            grow                     = false;
+
+            entry_t* current_entry = m_meta + slot;
+            if (current_entry->is_old())
+            {
+                current_entry->emplace(distance_from_desired, item_index);
+                ++num_elements;
+                return current_entry;
+            }
+
+            for (; current_entry->distance_from_desired >= distance_from_desired; ++current_entry, ++distance_from_desired)
+            {
+                if (current_entry->is_old())
+                {
+                    return current_entry;
+                }
+            }
+
+            return displace_new_key(distance_from_desired, current_entry, item_index, grow);
+        }
+
+        entry_t* displace_new_key(s8 distance_from_desired, entry_t* current_entry, u32 item_index, bool& grow)
+        {
+            if (m_num_slots_minus_one == 0 || distance_from_desired == m_max_lookups || ((m_num_elements + 1) > (((m_num_slots_minus_one + 1) << 10) / m_max_load_factor)))
+            {
+                // we need to indicate that we haven't resized enough, we still detected an entry with maximum lookups
+                grow = true;
+                return nullptr;
+            }
+            else if (current_entry->is_empty())
+            {
+                current_entry->emplace(distance_from_desired, item_index);
+                ++num_elements;
+                return current_entry;
+            }
+            u32 to_insert = item_index;
+
+            distance_from_desired = current_entry->distance_from_desired(distance_from_desired);
+            to_insert             = current_entry->value(to_insert);
+
+            for (++distance_from_desired, ++current_entry;; ++current_entry)
+            {
+                if (current_entry->is_empty())
+                {
+                    u32 const prev_item_index = current_entry->displace(distance_from_desired, to_insert);
+                    ++num_elements;
+                    return m_meta + prev_item_index;
+                }
+                else if (current_entry->is_old())
+                {
+                    u32 const prev_item_index = current_entry->displace(distance_from_desired, to_insert);
+                    ++num_elements;
+                    return m_meta + prev_item_index;
+                }
+                else if (current_entry->distance_from_desired < distance_from_desired)
+                {
+                    distance_from_desired = current_entry->distance_from_desired(distance_from_desired);
+                    to_insert             = current_entry->value(to_insert);
+                    ++distance_from_desired;
+                }
+                else
+                {
+                    ++distance_from_desired;
+                    if (distance_from_desired == max_lookups)
+                    {
+                        // we need to indicate that we haven't resized enough, we still detected an entry with maximum lookups
+                        grow = true;
+                        return nullptr;
+                    }
+                }
+            }
+
+            return nullptr;
+        }
+    };
+} // namespace xcore
 
 #endif // __X_GENERICS_CONTAINERS_MAP_H__
