@@ -7,11 +7,11 @@
 
 namespace xcore
 {
-    template <typename T, typename S> struct entry_t
+    template <typename T, typename S> struct hashmap_entry_t
     {
     };
 
-    // layout using 2 arrays, one for the high part of entry_t and one for the low part of entry_t.
+    // layout using 2 arrays, one for the high part of hashmap_entry_t and one for the low part of hashmap_entry_t.
     //
     // 1/1, 2 bytes, max 512 elements
     // 1/2, 3 bytes, max 128 K elements
@@ -27,23 +27,25 @@ namespace xcore
     // empty = this bit markes if the entry is empty
     // value = high bit of value
 
-    // template <> struct entry_t<s8, s8>
-    // template <> struct entry_t<s8, u16>
-    // template <> struct entry_t<s16, u16>
-    // template <> struct entry_t<s8, u32>
+    // template <> struct hashmap_entry_t<s8, s8>
+    // template <> struct hashmap_entry_t<s8, u16>
+    // template <> struct hashmap_entry_t<s16, u16>
+    // template <> struct hashmap_entry_t<s8, u32>
 
-    template <> struct entry_t<s8, u8>
+    // NOTE: We could make the members pointers and then we could increment/iterate the entry easily
+
+    template <> struct hashmap_entry_t<s8, u8>
     {
-        entry_t(s8* d, u8* v)
+        hashmap_entry_t(s8* d, u8* v)
             : m_d(d)
             , m_v(v)
         {
         }
-        ~entry_t() {}
+        ~hashmap_entry_t() {}
 
-        static entry_t* empty_default_table()
+        static hashmap_entry_t* empty_default_table()
         {
-            static entry_t result[cmin_lookups] = {{}, {}, {}, {cspecial_end_value}};
+            static hashmap_entry_t result[cmin_lookups] = {{}, {}, {}, {cspecial_end_value}};
             return result;
         }
 
@@ -107,18 +109,18 @@ namespace xcore
         u8& m_v;
     };
 
-    template <> struct entry_t<s8, u16>
+    template <> struct hashmap_entry_t<s8, u16>
     {
-        entry_t(s8* d, u16* v)
+        hashmap_entry_t(s8* d, u16* v)
             : m_d(d)
             , m_v(v)
         {
         }
-        ~entry_t() {}
+        ~hashmap_entry_t() {}
 
-        static entry_t* empty_default_table()
+        static hashmap_entry_t* empty_default_table()
         {
-            static entry_t result[cmin_lookups] = {{}, {}, {}, {cspecial_end_value}};
+            static hashmap_entry_t result[cmin_lookups] = {{}, {}, {}, {cspecial_end_value}};
             return result;
         }
 
@@ -176,19 +178,19 @@ namespace xcore
         u16& m_v;
     };
 
-    template <> struct entry_t<s16, u16>
+    template <> struct hashmap_entry_t<s16, u16>
     {
-        entry_t(s16* d, u16* v)
+        hashmap_entry_t(s16* d, u16* v)
             : m_d(((s8*)d)[0])
             , m_vh(((s8*)d)[1])
             , m_vl(*v)
         {
         }
-        ~entry_t() {}
+        ~hashmap_entry_t() {}
 
-        static entry_t* empty_default_table()
+        static hashmap_entry_t* empty_default_table()
         {
-            static entry_t result[cmin_lookups] = {{}, {}, {}, {cspecial_end_value}};
+            static hashmap_entry_t result[cmin_lookups] = {{}, {}, {}, {cspecial_end_value}};
             return result;
         }
 
@@ -255,18 +257,18 @@ namespace xcore
         u16& m_vl;
     };
 
-    template <> struct entry_t<s8, u32>
+    template <> struct hashmap_entry_t<s8, u32>
     {
-        entry_t(s8* d, u32* v)
+        hashmap_entry_t(s8* d, u32* v)
             : m_d(*d)
             , m_v(*v)
         {
         }
-        ~entry_t() {}
+        ~hashmap_entry_t() {}
 
-        static entry_t* empty_default_table()
+        static hashmap_entry_t* empty_default_table()
         {
-            static entry_t result[cmin_lookups] = {{}, {}, {}, {cspecial_end_value}};
+            static hashmap_entry_t result[cmin_lookups] = {{}, {}, {}, {cspecial_end_value}};
             return result;
         }
 

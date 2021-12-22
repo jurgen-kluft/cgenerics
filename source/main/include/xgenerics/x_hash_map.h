@@ -105,10 +105,10 @@ namespace xcore
         u32              m_current_prime_size;
     };
 
-    template <typename Key, typename Value, typename HashPolicy = fibonacci_hash_policy, typename EntryHT = s8, typename EntryLT = s16> class hashmap_t
+    template <typename Key, typename Value, typename HashPolicy = fibonacci_hash_policy, typename EntryHT = s8, typename EntryLT = u16> class hashmap_t
     {
         using hash_policy = HashPolicy;
-        using entry_type  = entry_t<EntryHT, EntryLT>;
+        using entry_type  = hashmap_entry_t<EntryHT, EntryLT>;
 
         static constexpr s8 cmin_lookups = 4;
         static s8           compute_max_lookups(u64 new_num_elements)
