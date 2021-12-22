@@ -19,10 +19,16 @@ UNITTEST_SUITE_BEGIN(hashmap)
 
         UNITTEST_TEST(construct)
         {
-            s32* keys = create_darray<s32>(0, 1024, 65536);
-            s32* values = create_darray<s32>(0, 1024, 65536);
-            u32* meta = create_darray<u32>(0, 1024, 65536);
+            array_t<s32>* keys = array_t<s32>::create(0, 1024, 65536);
+            array_t<s32>* values = array_t<s32>::create(0, 1024, 65536);
+            array_t<u32>* meta = array_t<u32>::create(0, 1024, 65536);
             hashmap_t<s32, s32> hm(keys,values,meta);
+
+            keys->add_item(100);
+            values->add_item(-100);
+            
+            hm.insert(0);
+            hm.rehash(1);
 
         }
 
