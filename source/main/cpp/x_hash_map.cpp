@@ -60,7 +60,7 @@ namespace xcore
         5746614499066534157llu, 7240280573005008577llu, 9122181901073924329llu,
         11493228998133068689llu, 14480561146010017169llu, 18446744073709551557llu*/
     };
-    const s32 prime_number_hash_policy::s_prime_array_len((s32)(sizeof(s_prime_array) / sizeof(u64)));
+    const s32 prime_number_hash_policy::s_prime_array_len((s32)(sizeof(s_prime_array) / sizeof(u32)));
     // clang-format on
 
     prime_number_hash_policy::prime_number_hash_policy()
