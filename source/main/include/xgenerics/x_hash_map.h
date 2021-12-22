@@ -22,6 +22,11 @@ s32* keys = darray_create<s32>(0, 4096, 16*65536);
 s32* values = darray_create<s32>(0, 4096, 16*65536);
 u32* meta = darray_create<u32>(0, 4096, 16*65536);     // top 5 bits are used for the ll, 27 bits are for the number of items (2^27 = 128 Million items )
 
+or 
+entry_h_t* m_h;
+entry_l_t* m_l;
+And combine high and low to get distance and value, so we can have 1+1, 1+2, 1+4, 2+2
+
 map = hashmap_t<s32,s32>(keys, values, meta);
 map = hashmap_t<s32,s32>(); // create the keys, values and meta darray's ourselves
 map.inserti_range(0, 4096); // // index based range insertion, key and value index are identical
