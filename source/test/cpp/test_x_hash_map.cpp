@@ -30,6 +30,7 @@ UNITTEST_SUITE_BEGIN(hashmap)
             
             hm.insert(0);
             hm.rehash(1);
+            hm[0] = 100;
 
         }
 
