@@ -51,33 +51,41 @@ namespace xcore
             union
             {
                 u64 m_qw[4];
+                u32 m_dw[8];
                 u8  m_b8[32];
             };
 
-            s8 Begin(h2_t h, u32 mask)
-            {
-                if (mask == 0) return 32;
-                s8 i = xfindFirstBit(mask);
-                while (m_b8[i] != h)
+            // Writing the 8 bit hash bit by bit over 8 different sequential u32 registers then it would be
+            // easy to generate the mask, like:
+            void set_hash(h2_t hash, s8 const i) 
+            { 
+                u32 const bits[] = { 0, (1<<i) };
+                u32 const mask = ~bits[1];
+                for (s8 j=0; j<8; j++)
                 {
-                    i++;
-                    mask = mask & (0xFFFFFFFF<<i);
-                    if (mask == 0) return 32;
-                    i = xfindFirstBit(mask);
-                };
-                return i;
+                    m_dw[j] = (m_dw[j] & mask) | bits[(hash&1)];
+                    hash = (hash >> 1);
+                }
             }
-            bool End(s8 slot) const { return slot == 32; }
-            bool Next(h2_t h, s8& i, u32 mask) const
+
+            u32 match(h2_t hash, u32 mask) const
             {
-                do
+                // If we need to match with '1's, we need to AND with 0xFFFFFFFF
+                // If we need to match with '0's, we need to INVERT and AND with 0xFFFFFFFF
+                static u32 const masks[] = { 0xFFFFFFFF, 0x00000000 };
+                mask = (masks[(hash & 1)] ^ m_dw[0]); 
+                for (s8 i = 1; i < 8 && mask != 0; i++)
                 {
-                    i++;
-                    mask = mask & (0xFFFFFFFF<<i);
-                    if (mask == 0) return 32;
-                    i = xfindFirstBit(mask);
-                } while (m_b8[i] != h);
-                return i < 32;
+                    hash = hash >> 1; 
+                    mask = mask & (masks[(hash & 1)] ^ m_qw[1]);
+                }
+
+                // Mask will give us a '1' bit at each position where the hash was matching
+                // Main advantage is that we can mask this with the group information and come
+                // up with entries that need to be checked.
+                // So z_mask(h2, group->GetFull()) will give you a u32 that contains bits set
+                // for slots that are 'set' and have the same hash.
+                return mask;
             }
         };
 
