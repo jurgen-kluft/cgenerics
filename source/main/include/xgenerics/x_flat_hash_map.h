@@ -72,8 +72,11 @@ namespace xcore
             {
                 // If we need to match with '1's, we need to AND with 0xFFFFFFFF
                 // If we need to match with '0's, we need to INVERT and AND with 0xFFFFFFFF
+                // Note: We could do 4 u64 instead of 8 u32 but we need to expand the incoming
+                //       mask to u64 mask64 = ((u64)mask | ((u64)mask<<32));
+                //       Do not know if that is faster though, need to check with compiler explorer (https://godbolt.org/))
                 static u32 const masks[] = { 0xFFFFFFFF, 0x00000000 };
-                mask = (masks[(hash & 1)] ^ m_dw[0]); 
+                mask = mask & (masks[(hash & 1)] ^ m_dw[0]); 
                 for (s8 i = 1; i < 8 && mask != 0; i++)
                 {
                     hash = hash >> 1; 
