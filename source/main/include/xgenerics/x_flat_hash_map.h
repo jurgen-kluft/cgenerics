@@ -24,6 +24,7 @@ namespace xcore
         public:
             u32 m_empty;
             u32 m_deleted;
+            // Note; Maybe we should changed m_deleted into m_full?
 
             inline u32  GetFull() const { return ~(m_empty | m_deleted); }
             inline bool IsFull() const { return (m_empty | m_deleted) == 0; }
