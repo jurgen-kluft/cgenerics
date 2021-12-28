@@ -15,8 +15,6 @@
 
 namespace xcore
 {
-#define XCORE_PREDICT_TRUE(statement) (statement)
-
     namespace flash_hashmap_n
     {
         /*
@@ -27,7 +25,7 @@ namespace xcore
                If we do this then the result is a compact keys_ and values_
                array which can easily be used for iteration over all keys
                and values that are actually in the hashmap!
-               
+
         */
         class group_t
         {
@@ -48,7 +46,11 @@ namespace xcore
             inline s8   index_of_empty() const { return (s8)xfindFirstBit(m_empty); }
             inline s8   index_of_empty_or_deleted() const { return (s8)xfindFirstBit(m_empty | m_deleted); }
 
-            inline void clear() { m_empty = 0; m_deleted = 0; }
+            inline void clear()
+            {
+                m_empty   = 0xffffffff;
+                m_deleted = 0;
+            }
             inline void set_empty(s8 slot) { m_empty |= (1 << slot); }
             inline void set_not_empty(s8 slot) { m_empty &= ~(1 << slot); }
             inline void set_deleted(s8 slot) { m_deleted |= (1 << slot); }
@@ -64,21 +66,23 @@ namespace xcore
         class bitmask_t
         {
         public:
+            inline bitmask_t(u32 _mask) : mask_(_mask) {}
+
             bitmask_t& operator++()
             {
                 mask_ &= (mask_ - 1);
                 return *this;
             }
             explicit operator bool() const { return mask_ != 0; }
-            uint32_t operator*() const { return LowestBitSet(); }
-            uint32_t LowestBitSet() const { return xfindFirstBit(mask_); }
-            uint32_t HighestBitSet() const { return xfindLastBit(mask_); }
+            u32 operator*() const { return LowestBitSet(); }
+            u32 LowestBitSet() const { return xfindFirstBit(mask_); }
+            u32 HighestBitSet() const { return xfindLastBit(mask_); }
 
             bitmask_t begin() const { return *this; }
             bitmask_t end() const { return bitmask_t(0); }
 
-            uint32_t TrailingZeros() const { return xcountTrailingZeros(mask_); }
-            uint32_t LeadingZeros() const { return xcountLeadingZeros(mask_); }
+            u32 TrailingZeros() const { return xcountTrailingZeros(mask_); }
+            u32 LeadingZeros() const { return xcountLeadingZeros(mask_); }
 
         private:
             friend bool operator==(const bitmask_t& a, const bitmask_t& b) { return a.mask_ == b.mask_; }
@@ -159,7 +163,7 @@ namespace xcore
             // The low bits of the pointer have little or no entropy because of
             // alignment. We shift the pointer to try to use higher entropy bits. A
             // good number seems to be 12 bits, because that aligns with page size.
-            return reinterpret_cast<uintptr_t>(unique_stable_ptr) >> 12;
+            return reinterpret_cast<uptr>(unique_stable_ptr) >> 12;
         }
 
         typedef u8 h2_t;
@@ -370,7 +374,7 @@ namespace xcore
             // Reset all ctrl bytes back to Empty, except the sentinel.
             inline void reset_groups(u64 capacity)
             {
-                //NOTE: This can be optimized a lot, by not iterating over groups, but just pure memory
+                // NOTE: This can be optimized a lot, by not iterating over groups, but just pure memory
                 u32 const number_of_groups = capacity / 32;
                 {
                     group_t* g = groups_->get_item(i);
@@ -380,7 +384,7 @@ namespace xcore
 
             inline void clear_groups(u32 from, u32 to)
             {
-                //NOTE: This can be optimized a lot, by not iterating over groups, but just pure memory
+                // NOTE: This can be optimized a lot, by not iterating over groups, but just pure memory
                 for (u64 i = from; i < to; i++)
                 {
                     group_t* g = groups_->get_item(i);
@@ -393,14 +397,14 @@ namespace xcore
                 ASSERT(capacity_);
 
                 u32 const oldsize = groups_->size();
-                groups_->set_capacity(capacity_);
-                groups_->set_size(capacity_);
-                ctrls_->set_capacity(capacity_);
-                ctrls_->set_size(capacity_);
+                groups_->set_capacity(capacity_ / 32); // groups manage 32 elements
+                groups_->set_size(capacity_ / 32);
+                ctrls_->set_capacity(capacity_ / 32); // ctrls manage 32 elements
+                ctrls_->set_size(capacity_ / 32);
                 refs_->set_capacity(capacity_);
                 refs_->set_size(capacity_);
 
-                clear_groups(oldsize, capacity_);
+                clear_groups(oldsize, capacity_ / 32);
                 reset_groups(capacity_);
                 reset_growth_left();
             }
