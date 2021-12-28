@@ -43,13 +43,12 @@ namespace xcore
             inline bool is_empty(s8 slot) const { return (m_empty & (1 << slot)) != 0; }
             inline bool is_deleted(s8 slot) const { return (m_deleted & (1 << slot)) != 0; }
             inline bool is_used(s8 slot) const { return ((m_empty | m_deleted) & (1 << slot)) == 0; }
-            inline bool is_sentinel(s8 slot) const { u32 const bit = (1 << slot); return (m_empty & bit) == bit && (m_deleted & bit) == bit; }
             inline bool is_empty_or_delete(s8 slot) const { return ((m_empty | m_deleted) & (1 << slot)) != 0; }
             inline s8   index_of_deleted() const { return (s8)xfindFirstBit(m_deleted); }
             inline s8   index_of_empty() const { return (s8)xfindFirstBit(m_empty); }
             inline s8   index_of_empty_or_deleted() const { return (s8)xfindFirstBit(m_empty | m_deleted); }
 
-            inline void set_sentinel() { m_empty |= 0x80000000; m_deleted |= 0x80000000; }
+            inline void clear() { m_empty = 0; m_deleted = 0; }
             inline void set_empty(s8 slot) { m_empty |= (1 << slot); }
             inline void set_not_empty(s8 slot) { m_empty &= ~(1 << slot); }
             inline void set_deleted(s8 slot) { m_deleted |= (1 << slot); }
@@ -371,24 +370,37 @@ namespace xcore
             // Reset all ctrl bytes back to Empty, except the sentinel.
             inline void reset_groups(u64 capacity)
             {
+                //NOTE: This can be optimized a lot, by not iterating over groups, but just pure memory
                 u32 const number_of_groups = capacity / 32;
-                for (u64 i = 0; i < number_of_groups; i++)
                 {
                     group_t* g = groups_->get_item(i);
                     g->deleted_to_empty_and_full_to_deleted();
                 }
-                group_t* lastgroup = groups_->get_item(number_of_groups - 1);
-                lastgroup->set_sentinel();
+            }
+
+            inline void clear_groups(u32 from, u32 to)
+            {
+                //NOTE: This can be optimized a lot, by not iterating over groups, but just pure memory
+                for (u64 i = from; i < to; i++)
+                {
+                    group_t* g = groups_->get_item(i);
+                    g->clear();
+                }
             }
 
             void initialize_slots()
             {
                 ASSERT(capacity_);
 
+                u32 const oldsize = groups_->size();
                 groups_->set_capacity(capacity_);
+                groups_->set_size(capacity_);
                 ctrls_->set_capacity(capacity_);
+                ctrls_->set_size(capacity_);
                 refs_->set_capacity(capacity_);
+                refs_->set_size(capacity_);
 
+                clear_groups(oldsize, capacity_);
                 reset_groups(capacity_);
                 reset_growth_left();
             }
@@ -397,19 +409,13 @@ namespace xcore
             {
                 ASSERT(is_valid_capacity(new_capacity));
 
-                auto*     old_ctrl     = ctrls_;
-                auto*     old_slots    = slots_;
                 const u64 old_capacity = capacity_;
                 capacity_              = new_capacity;
-
                 initialize_slots();
-
-                // Any slot that was 'deleted' is now 'empty'
-                // Any slot that was 'used' is now 'deleted'
 
                 // When we rehash a 'deleted' element and find the group and slot we
                 // should want to insert it at we need to pop the one that is at
-                // THAT slot if it is marked as deleted. If we encounter a slot that is
+                // that slot if it is marked as deleted. If we encounter a slot that is
                 // marked as 'empty' we can simply insert and continue at the top level
                 // finding a 'deleted' slot.
 
