@@ -40,6 +40,7 @@ UNITTEST_SUITE_BEGIN(flat_hashmap)
 
             CHECK_EQUAL(true, group.has_empty());
             CHECK_EQUAL(false, group.has_deleted());
+            CHECK_EQUAL(0, group.get_used());
 
             for (s32 i = 0; i < 32; ++i)
             {
