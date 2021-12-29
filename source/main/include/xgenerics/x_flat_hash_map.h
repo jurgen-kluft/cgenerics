@@ -189,7 +189,7 @@ namespace xcore
         public:
             prober_t(u64 hash, u64 mask)
             {
-                ASSERT(((mask + 1) & mask) == 0 && "not a mask");
+                ASSERTS(((mask + 1) & mask) == 0, "not a mask");
                 mask_   = mask;
                 offset_ = hash & mask_;
                 index_  = 0;
@@ -220,10 +220,35 @@ namespace xcore
             u64 probe_length;
         };
 
+        inline u64 FNV1A(const xbyte* key, s32 wrdlen, u32 seed)
+        { // Pippip_Yurii version
+            const char* str    = (char*)key;
+            const u32   PRIME  = 591798841;
+            u64         hash64 = (u64)seed ^ (14695981039346656037ull);
+            u32         Cycles, NDhead;
+            if (wrdlen > 8)
+            {
+                Cycles = ((wrdlen - 1) >> 4) + 1;
+                NDhead = wrdlen - (Cycles << 3);
+                for (; Cycles--; str += 8)
+                {
+                    hash64 = (hash64 ^ (*(u64*)(str))) * PRIME;
+                    hash64 = (hash64 ^ (*(u64*)(str + NDhead))) * PRIME;
+                }
+            }
+            else
+            {
+#define _PADr_KAZE(x, n) (((x) << (n)) >> (n))
+                hash64 = (hash64 ^ _PADr_KAZE(*(u64*)(str + 0), (8 - wrdlen) << 3)) * PRIME;
+#undef _PADr_KAZE
+            }
+            return hash64;
+        }
+
         template <typename Key> class Fnv1aHash
         {
         public:
-            inline u64 operator()(const Key& key) { return 0; }
+            inline u64 operator()(const Key& key) const { return FNV1A((xbyte const*)&key, sizeof(Key), 981039); }
         };
 
         template <typename Key, typename Value, typename Hasher = Fnv1aHash<Key>> class hashmap_t
@@ -232,19 +257,34 @@ namespace xcore
 
             array_t<group_t>*     groups_;
             array_t<ctrl_t>*      ctrls_;
-            array_t<refs_t>* refs_;
+            array_t<refs_t>*      refs_;
             array_t<Key>*         keys_;
             array_t<Value>*       values_;
             u64                   size_;
-            u64                   capacity_;
+            u64                   capacity_;    // number of elements == (capacity_ + 1) * 32
             u64                   growth_left_;
 
         public:
+            // User expects capacity to be in the number of elements
+            hashmap_t(u32 capacity = 64) {
+                u32 const n = (capacity>>5);
+                groups_ = array_t<group_t>::create(n, n);
+                ctrls_ = array_t<ctrl_t>::create(n, n);
+                refs_ = array_t<refs_t>::create(n, n);
+                keys_ = array_t<Key>::create(0, n*32);
+                values_ = array_t<Value>::create(0, n*32);
+                size_ = 0;
+                capacity_ = n-1;
+                reset_growth_left();
+                clear_ctrls(0, n);
+                clear_groups(0, n);
+            }
+
             bool empty() const { return !size(); }
             u64  size() const { return size_; }
             u64  capacity() const { return capacity_; }
             u64  max_size() const { return (limits_t<u64>::maximum()); }
-            void reset_growth_left() { growth_left() = capacity_to_grow(capacity()) - size_; }
+            void reset_growth_left() { growth_left() = (size_to_grow(capacity()*32) - size_); }
             u64& growth_left() { return growth_left_; }
 
             Value* find(const Key& key)
@@ -269,7 +309,7 @@ namespace xcore
                         break;
 
                     seq.next();
-                    ASSERTS(seq.index() <= capacity_, "full table!");
+                    ASSERTS(seq.index() <= capacity_*32, "full table!");
                 }
                 return nullptr;
             }
@@ -310,16 +350,18 @@ namespace xcore
                 u32 const item_index = keys_->size();
                 keys_->add_item(key);
                 values_->add_item(value);
-                set_ctrl(target, H2(hash), item_index, capacity_);
+                set_ctrl(target, H2(hash), item_index);
                 return true;
             }
 
-            void set_ctrl(findinfo_t const& fi, h2_t hash, u32 item_index, u64 capacity)
+            void set_ctrl(findinfo_t const& fi, h2_t hash, u32 item_index)
             {
                 ctrl_t* ctrl = ctrls_->get_item(fi.offset);
                 ctrl->set_hash(hash, fi.index);
                 group_t* group = groups_->get_item(fi.offset);
                 group->set_used(fi.index);
+                refs_t* refs = refs_->get_item(fi.offset);
+                refs->m_refs[fi.index] = item_index;
             }
 
             bool erase(Key const& key)
@@ -458,10 +500,9 @@ namespace xcore
             inline bool is_valid_capacity(u64 n) const { return ((n + 1) & n) == 0 && n > 0; }
             // Rounds up the capacity to the next power of 2 minus 1, with a minimum of 1.
             inline u64 normalize_capacity(u64 n) const { return n ? (0xffffffffffffffffull >> xcountLeadingZeros(n)) : 1; }
-            inline u64 capacity_to_grow(u64 capacity) const
+            inline u64 size_to_grow(u64 max_size) const
             {
-                ASSERT(is_valid_capacity(capacity));
-                return (capacity * 8 - capacity) / 8; // `capacity*7/8`
+                return (max_size * 8 - max_size) / 8; // `n*7/8`
             }
 
             inline bool is_used(u32 offset, u32 index) const
@@ -509,7 +550,7 @@ namespace xcore
                 {
                     resize(32);
                 }
-                else if (capacity_ > 32 && ((size() * u64{32}) <= (capacity_ * u64{25})))
+                else if (capacity_ > 1 && ((size() * u64{32}) <= ((capacity_*32) * u64{25})))
                 {
                     // Squash DELETED without growing if there is enough capacity.
                     //
@@ -523,14 +564,23 @@ namespace xcore
             }
 
             // Reset all ctrl bytes back to Empty, except the sentinel.
-            inline void reset_groups(u64 capacity)
+            inline void reset_groups(u32 from, u32 to)
             {
                 // NOTE: This can be optimized a lot, by not iterating over groups, but just pure memory
-                u32 const number_of_groups = (u32)(capacity / 32);
-                for (u32 i = 0; i < number_of_groups; i++)
+                for (u32 i = from; i < to; i++)
                 {
                     group_t* g = groups_->get_item(i);
                     g->deleted_to_empty_and_full_to_deleted();
+                }
+            }
+
+            inline void clear_ctrls(u32 from, u32 to)
+            {
+                // NOTE: This can be optimized a lot, by not iterating over groups, but just pure memory
+                for (u32 i = from; i < to; i++)
+                {
+                    ctrl_t* c = ctrls_->get_item(i);
+                    c->clear();
                 }
             }
 
@@ -546,18 +596,19 @@ namespace xcore
 
             void initialize_slots()
             {
-                ASSERT(capacity_);
+                ASSERT(capacity_>0);
 
                 u32 const oldsize = groups_->size();
-                groups_->set_capacity((u32)(capacity_ / 32)); // groups manage 32 elements
-                groups_->set_size((u32)(capacity_ / 32));
-                ctrls_->set_capacity((u32)(capacity_ / 32)); // ctrls manage 32 elements
-                ctrls_->set_size((u32)(capacity_ / 32));
-                refs_->set_capacity((u32)(capacity_ / 32));
-                refs_->set_size((u32)(capacity_ / 32));
+                u32 const n = (u32)(capacity_ + 1);
+                groups_->set_capacity(n);
+                groups_->set_size(n);
+                ctrls_->set_capacity(n);
+                ctrls_->set_size(n);
+                refs_->set_capacity(n);
+                refs_->set_size(n);
 
-                clear_groups(oldsize, (u32)(capacity_ / 32));
-                reset_groups(capacity_);
+                clear_groups(oldsize, groups_->size());
+                reset_groups(0, oldsize);
                 reset_growth_left();
             }
 
@@ -577,7 +628,7 @@ namespace xcore
 
                 u64 total_probe_length = 0;
                 Hasher     hasher;
-                for (u64 i = 0; i != old_capacity; ++i)
+                for (u64 i = 0; i != (old_capacity*32); ++i)
                 {
                     if (is_deleted((u32)(i >> 5), (u32)(i & 0x1F)))
                     {
@@ -591,12 +642,12 @@ namespace xcore
                             total_probe_length += target.probe_length;
                             if (is_empty(target.offset, target.index))
                             {
-                                set_ctrl(target, H2(hash), current_item, capacity_);
+                                set_ctrl(target, H2(hash), current_item);
                                 break;
                             }
                             refs_t* target_refs = refs_->get_item(target.offset);
                             u32 previous_item = target_refs->m_refs[target.index];
-                            set_ctrl(target, H2(hash), current_item, capacity_);
+                            set_ctrl(target, H2(hash), current_item);
 
                             // take the previous item that was at this slot and insert it
                             current_item = previous_item;

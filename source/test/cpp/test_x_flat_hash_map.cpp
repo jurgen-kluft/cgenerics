@@ -86,7 +86,8 @@ UNITTEST_SUITE_BEGIN(flat_hashmap)
         UNITTEST_TEST(insert)
         {
             flat_hashmap_n::hashmap_t<s32, s32> map;
-            map.insert(0, 0);
+            CHECK_EQUAL(true, map.insert(0, 0));
+            CHECK_EQUAL(false, map.insert(0, 0));
         }
     }
 }
