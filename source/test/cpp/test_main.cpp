@@ -8,7 +8,8 @@
 
 UNITTEST_SUITE_LIST(xGenericsUnitTest);
 UNITTEST_SUITE_DECLARE(xGenericsUnitTest, vector);
-UNITTEST_SUITE_DECLARE(xGenericsUnitTest, hashmap);
+//UNITTEST_SUITE_DECLARE(xGenericsUnitTest, hashmap);
+UNITTEST_SUITE_DECLARE(xGenericsUnitTest, flat_hashmap);
 
 namespace xcore
 {

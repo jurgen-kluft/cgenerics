@@ -19,10 +19,10 @@ UNITTEST_SUITE_BEGIN(hashmap)
 
         UNITTEST_TEST(construct)
         {
-            array_t<s32>* keys = array_t<s32>::create(0, 1024, 65536);
-            array_t<s32>* values = array_t<s32>::create(0, 1024, 65536);
-            array_t<s8>* entry_h = array_t<s8>::create(0, 1024, 65536);
-            array_t<u16>* entry_l = array_t<u16>::create(0, 1024, 65536);
+            array_t<s32>* keys = array_t<s32>::create(0, 1024);
+            array_t<s32>* values = array_t<s32>::create(0, 1024);
+            array_t<s8>* entry_h = array_t<s8>::create(0, 1024);
+            array_t<u16>* entry_l = array_t<u16>::create(0, 1024);
             hashmap_t<s32, s32> hm(keys,values,entry_h,entry_l);
 
             keys->add_item(100);

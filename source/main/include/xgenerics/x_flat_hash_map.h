@@ -15,7 +15,7 @@
 
 namespace xcore
 {
-    namespace flash_hashmap_n
+    namespace flat_hashmap_n
     {
         /*
         Erase: When removing an item from this hash map we can do a swap
@@ -66,7 +66,10 @@ namespace xcore
         class bitmask_t
         {
         public:
-            inline bitmask_t(u32 _mask) : mask_(_mask) {}
+            inline bitmask_t(u32 _mask)
+                : mask_(_mask)
+            {
+            }
 
             bitmask_t& operator++()
             {
@@ -74,9 +77,9 @@ namespace xcore
                 return *this;
             }
             explicit operator bool() const { return mask_ != 0; }
-            u32 operator*() const { return LowestBitSet(); }
-            u32 LowestBitSet() const { return xfindFirstBit(mask_); }
-            u32 HighestBitSet() const { return xfindLastBit(mask_); }
+            u32      operator*() const { return LowestBitSet(); }
+            u32      LowestBitSet() const { return xfindFirstBit(mask_); }
+            u32      HighestBitSet() const { return xfindLastBit(mask_); }
 
             bitmask_t begin() const { return *this; }
             bitmask_t end() const { return bitmask_t(0); }
@@ -91,6 +94,24 @@ namespace xcore
             u32 mask_;
         };
 
+        // Returns a hash seed.
+        //
+        // The seed consists of a unique stable pointer which adds enough entropy to ensure
+        // non-determinism of iteration order in most cases.
+        inline u64 hash_seed(const void* unique_stable_ptr)
+        {
+            // The low bits of the pointer have little or no entropy because of
+            // alignment. We shift the pointer to try to use higher entropy bits. A
+            // good number seems to be 12 bits, because that aligns with page size.
+            return reinterpret_cast<uptr>(unique_stable_ptr) >> 12;
+        }
+
+        typedef u8 h2_t;
+
+        inline u64  H1(u64 hash, const void* unique_stable_ptr) { return (hash >> 8) ^ hash_seed(unique_stable_ptr); }
+        inline h2_t H2(u64 hash) { return hash & 0xFF; }
+
+
         class ctrl_t
         {
         public:
@@ -100,6 +121,14 @@ namespace xcore
                 u32 m_dw[8];
                 u8  m_b8[32];
             };
+
+            void clear()
+            {
+                m_qw[0]=0;
+                m_qw[1]=0;
+                m_qw[2]=0;
+                m_qw[3]=0;
+            }
 
             // Writing the 8 bit hash bit by bit over 8 different sequential u32 registers then it would be
             // easy to generate the mask, like:
@@ -136,7 +165,7 @@ namespace xcore
                 for (s8 i = 1; i < 8 && mask != 0; i++)
                 {
                     hash = hash >> 1;
-                    mask = mask & (masks[(hash & 1)] ^ m_qw[1]);
+                    mask = mask & (masks[(hash & 1)] ^ m_dw[i]);
                 }
 
                 // Mask will give us a '1' bit at each position where the hash was matching
@@ -153,23 +182,6 @@ namespace xcore
         public:
             T m_refs[32];
         };
-
-        // Returns a hash seed.
-        //
-        // The seed consists of a unique stable pointer which adds enough entropy to ensure
-        // non-determinism of iteration order in most cases.
-        inline u64 hash_seed(const void* unique_stable_ptr)
-        {
-            // The low bits of the pointer have little or no entropy because of
-            // alignment. We shift the pointer to try to use higher entropy bits. A
-            // good number seems to be 12 bits, because that aligns with page size.
-            return reinterpret_cast<uptr>(unique_stable_ptr) >> 12;
-        }
-
-        typedef u8 h2_t;
-
-        inline u64  H1(u64 hash, const void* unique_stable_ptr) { return (hash >> 8) ^ hash_seed(unique_stable_ptr); }
-        inline h2_t H2(u64 hash) { return hash & 0xFF; }
 
         class prober_t
         {
@@ -226,6 +238,13 @@ namespace xcore
             u64                   growth_left_;
 
         public:
+            bool empty() const { return !size(); }
+            u64  size() const { return size_; }
+            u64  capacity() const { return capacity_; }
+            u64  max_size() const { return (limits_t<u64>::maximum()); }
+            void reset_growth_left() { growth_left() = capacity_to_grow(capacity()) - size_; }
+            u64& growth_left() { return growth_left_; }
+
             Value* find(const Key& key)
             {
                 Hasher     hasher;
@@ -293,13 +312,129 @@ namespace xcore
                 return true;
             }
 
-            bool empty() const { return !size(); }
-            u64  size() const { return size_; }
-            u64  capacity() const { return capacity_; }
-            u64  max_size() const { return (limits_t<u64>::maximum()); }
-            void reset_growth_left() { growth_left() = capacity_to_grow(capacity()) - size_; }
-            u64& growth_left() { return growth_left_; }
+            bool erase(Key const& key)
+            {
+                // find the group and slot for this key
+                // get the last entry of the keys_/values_, find it
+                // swap the key/value (keys_, values_) with the last entry
+                // change the item index of the last entry
 
+                return false;
+            }
+
+            class iterator
+            {
+            public:
+                iterator()
+                    : m_keys(nullptr)
+                    , m_values(nullptr)
+                    , m_index(0)
+                {
+                }
+                iterator(iterator const& i)
+                    : m_keys(i.m_keys)
+                    , m_values(i.m_values)
+                    , m_index(i.m_index)
+                {
+                }
+
+                const Key& operator*() const { return *m_keys->get_item(m_index); }
+                const Key& operator->() const { return *m_keys->get_item(m_index); }
+
+                const Key&   first() const { return *m_keys->get_item(m_index); }
+                const Value& second() const { return *m_values->get_item(m_index); }
+
+                iterator& operator++()
+                {
+                    ++m_index;
+                    return *this;
+                }
+                iterator operator++(int)
+                {
+                    iterator i = *this;
+                    m_index++;
+                    return i;
+                }
+
+                bool operator==(const iterator& other) const { return m_keys == other.m_keys && m_values == other.m_values && m_index == other.m_index; }
+                bool operator!=(const iterator& other) const { return m_keys != other.m_keys || m_values != other.m_values || m_index != other.m_index; }
+
+            private:
+                iterator(array_t<Key>* keys, array_t<Value>* values, u32 index=0)
+                    : m_keys(keys)
+                    , m_values(values)
+                    , m_index(0)
+                {
+                }
+
+                array_t<Key>*   m_keys;
+                array_t<Value>* m_values;
+                u32             m_index;
+            };
+
+            class const_iterator
+            {
+            public:
+                const_iterator()
+                    : m_keys(nullptr)
+                    , m_values(nullptr)
+                    , m_index(0)
+                {
+                }
+                const_iterator(const const_iterator& i)
+                    : m_keys(i.m_keys)
+                    , m_values(i.m_values)
+                    , m_index(i.m_index)
+                {
+                }
+                const_iterator(iterator i)
+                    : m_keys(i.m_keys)
+                    , m_values(i.m_values)
+                    , m_index(i.m_index)
+                {
+                }
+
+                Key const& operator*() const { return *m_keys->get_item(m_index); }
+                Key const& operator->() const { return *m_keys->get_item(m_index); }
+
+                Key const&   first() const { return *m_keys->get_item(m_index); }
+                Value const& second() const { return *m_values->get_item(m_index); }
+
+                const_iterator& operator++()
+                {
+                    ++m_index;
+                    return *this;
+                }
+                const_iterator operator++(int)
+                {
+                    const_iterator i = *this;
+                    m_index++;
+                    return i;
+                }
+
+                bool operator==(const const_iterator& other) const { return m_keys == other.m_keys && m_values == other.m_values && m_index == other.m_index; }
+                bool operator!=(const const_iterator& other) const { return m_keys != other.m_keys || m_values != other.m_values || m_index != other.m_index; }
+
+            private:
+                const_iterator(const array_t<Key>* keys, const array_t<Value>* values)
+                    : m_keys(keys)
+                    , m_values(values)
+                    , m_index(0)
+                {
+                }
+
+                array_t<Key> const*   m_keys;
+                array_t<Value> const* m_values;
+                u32                   m_index;
+            };
+
+            iterator begin() { return iterator(keys_, values_); }
+            iterator end() { return iterator(keys_, values_, keys_->size()); }
+
+            const_iterator begin() const { return const_iterator(keys_, values_); }
+            const_iterator end() const { return const_iterator(keys_, values_, keys_->size()); }
+
+        private:
             // General notes on capacity/growth methods below:
             // - We use 7/8th as maximum load factor. For 16-wide groups, that gives an
             //   average of two empty slots per group.

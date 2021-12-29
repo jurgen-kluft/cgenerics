@@ -118,7 +118,7 @@ namespace xcore
             return math::maximum(cmin_lookups, desired);
         }
 
-        inline entry_type get_entry(u64 index) { return entry_type(m_entry_ht->get_item(index), m_entry_lt->get_item(index)); }
+        inline entry_type get_entry(u64 index) { return entry_type(m_entry_ht->get_item((u32)index), m_entry_lt->get_item((u32)index)); }
 
         void reset_to_empty_state()
         {
