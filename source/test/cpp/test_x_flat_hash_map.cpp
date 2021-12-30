@@ -86,8 +86,8 @@ UNITTEST_SUITE_BEGIN(flat_hashmap)
         UNITTEST_TEST(insert)
         {
             flat_hashmap_n::hashmap_t<s32, s32> map;
-            CHECK_EQUAL(true, map.insert(0, 0));
-            CHECK_EQUAL(false, map.insert(0, 0));
+            CHECK_TRUE(map.insert(0, 0));
+            CHECK_FALSE(map.insert(0, 0));
         }
 
         UNITTEST_TEST(insert_to_grow)
@@ -106,6 +106,27 @@ UNITTEST_SUITE_BEGIN(flat_hashmap)
             CHECK_EQUAL(true, map.insert(56, 56));
 
             for (s32 i = 0; i < 57; ++i)
+            {
+                CHECK_NOT_NULL(map.find(i));
+            }
+        }
+
+        UNITTEST_TEST(insert_erase_find_simple)
+        {
+            flat_hashmap_n::hashmap_t<s32, s32> map;
+            for (s32 i = 0; i < 32; ++i)
+            {
+                CHECK_EQUAL(true, map.insert(i, i));
+            }
+            for (s32 i = 0; i < 32; ++i)
+            {
+                CHECK_NOT_NULL(map.find(i));
+            }
+            for (s32 i = 0; i < 32; i+=2)
+            {
+                CHECK_EQUAL(true, map.erase(i));
+            }
+            for (s32 i = 1; i < 32; i+=2)
             {
                 CHECK_NOT_NULL(map.find(i));
             }

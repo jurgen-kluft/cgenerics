@@ -31,9 +31,9 @@ namespace xcore
                 return *this;
             }
             explicit operator bool() const { return m_mask != 0; }
-            u32      operator*() const { return lowest_bit_set(); }
-            u32      lowest_bit_set() const { return xfindFirstBit(m_mask); }
-            u32      highest_bit_set() const { return xfindLastBit(m_mask); }
+            s8       operator*() const { return lowest_bit_set(); }
+            s8       lowest_bit_set() const { return xfindFirstBit(m_mask); }
+            s8       highest_bit_set() const { return xfindLastBit(m_mask); }
 
             bitmask_t begin() const { return *this; }
             bitmask_t end() const { return bitmask_t(0); }
@@ -133,8 +133,9 @@ namespace xcore
                 m_deleted      = full;
             }
 
-            inline void set_item(u32 item_index, s8 i) { m_refs[i] = item_index; }
-            inline u32  replace_item(u32 item_index, s8 i) { u32 const old_item = m_refs[i];  m_refs[i] = item_index; return old_item;  }
+            inline u32 get_ref(s8 i) const { return m_refs[i]; }
+            inline void set_ref(u32 item_index, s8 i) { m_refs[i] = item_index; }
+            inline u32  replace_ref(u32 item_index, s8 i) { u32 const old_item = m_refs[i];  m_refs[i] = item_index; return old_item; }
         };
 
         class prober_t
@@ -168,7 +169,7 @@ namespace xcore
 
         struct findinfo_t
         {
-            u32 offset;
+            s32 offset;
             s8 index;
             u64 probe_length;
         };
@@ -227,51 +228,22 @@ namespace xcore
             Value* find(const Key& key)
             {
                 Hasher     hasher;
-                u64 const  hash = hasher(key);
-                h2_t const h    = H2(hash);
-                auto       seq  = probe(hash, m_capacity);
-                while (true)
-                {
-                    ctrl_t*   ctrl    = m_ctrls->get_item(seq.offset());
-                    bitmask_t bitmask = ctrl->match(h, ctrl->get_used());
-                    for (u32 i : bitmask)
-                    {
-                        const u32  other_ref = m_ctrls->get_item((u32)seq.offset())->m_refs[i];
-                        const Key* other_key = m_keys->get_item(other_ref);
-                        if (key == *other_key)
-                            return m_values->get_item(other_ref);
-                    }
-                    if (ctrl->has_empty())
-                        break;
-
-                    seq.next();
-                    ASSERTS(seq.index() <= m_capacity, "full table!");
-                }
-                return nullptr;
+                u64 const  chash = hasher(key);
+                findinfo_t cfi = find_internal(key, chash);
+                if (cfi.offset < 0)
+                    return nullptr;
+                ctrl_t const* cctrl = m_ctrls->get_item(cfi.offset);
+                u32 const entry_index = cctrl->get_ref(cfi.index);
+                return m_values->get_item(entry_index);
             }
 
             bool insert(Key const& key, Value const& value)
             {
                 Hasher     hasher;
                 u64 const  hash = hasher(key);
-                h2_t const h    = H2(hash);
-                prober_t   seq  = probe(hash, m_capacity);
-                while (true)
-                {
-                    ctrl_t*   ctrl    = m_ctrls->get_item(seq.offset());
-                    bitmask_t bitmask = ctrl->match(h, ctrl->get_used());
-                    for (u32 i : bitmask)
-                    {
-                        const u32  other_ref = m_ctrls->get_item(seq.offset())->m_refs[i];
-                        const Key* other_key = m_keys->get_item(other_ref);
-                        if (key == *other_key)
-                            return false;
-                    }
-                    if (ctrl->has_empty())
-                        break;
-                    seq.next();
-                    ASSERTS(seq.index() <= m_capacity, "full table!");
-                }
+                findinfo_t current = find_internal(key, hash);
+                if (current.offset >= 0)
+                    return false;
 
                 findinfo_t target = find_first_non_full(hash, m_capacity);
                 if (growth_left() == 0 && !is_deleted(target.offset, target.index))
@@ -291,12 +263,34 @@ namespace xcore
 
             bool erase(Key const& key)
             {
-                // find the group and slot for this key
-                // get the last entry of the m_keys/m_values, find it
-                // swap the key/value (m_keys, m_values) with the last entry
-                // change the item index of the last entry
+                if (empty())
+                    return false;
 
-                return false;
+                // current or 'c' element
+                Hasher     hasher;
+                u64 const  chash = hasher(key);
+                findinfo_t const cfi = find_internal(key, chash);
+                if (cfi.offset < 0)
+                    return false;
+                ctrl_t* cctrl = m_ctrls->get_item(cfi.offset);
+                cctrl->set_deleted(cfi.index);
+
+                // end of 'e' element
+                u32 const ei = m_keys->size() - 1;
+                u64 const  ehash = hasher(*m_keys->get_item(ei));
+                findinfo_t const efi = find_internal(*m_keys->get_item(ei), ehash);
+                ctrl_t* ectrl = m_ctrls->get_item(efi.offset);
+
+                // Update the reference on the 'e' element
+                u32 const cei = cctrl->get_ref(cfi.index);
+                ectrl->set_ref(cei, efi.index);
+                
+                // Set current key/value with last key/value
+                m_keys->set_item(cei, *m_keys->get_item(ei));
+                m_values->set_item(cei, *m_values->get_item(ei));
+                m_keys->set_size(ei);
+                m_values->set_size(ei);
+                return true;
             }
 
             class iterator
@@ -448,6 +442,30 @@ namespace xcore
                 return ctrl->is_deleted(index);
             }
 
+            inline findinfo_t find_internal(const Key& key, u64 hash) const
+            {
+                h2_t const h    = H2(hash);
+                auto       seq  = probe(hash, m_capacity);
+                while (true)
+                {
+                    ctrl_t*   ctrl    = m_ctrls->get_item(seq.offset());
+                    bitmask_t bitmask = ctrl->match(h, ctrl->get_used());
+                    for (s8 i : bitmask)
+                    {
+                        const u32  other_ref = m_ctrls->get_item((u32)seq.offset())->m_refs[i];
+                        const Key* other_key = m_keys->get_item(other_ref);
+                        if (key == *other_key)
+                            return {(s32)seq.offset(), i, seq.index()};
+                    }
+                    if (ctrl->has_empty())
+                        break;
+
+                    seq.next();
+                    ASSERTS(seq.index() <= m_capacity, "full table!");
+                }
+                return {-1,-1,0};
+            }
+
             inline findinfo_t find_first_non_full(u64 hash, u64 capacity) const
             {
                 auto seq = probe(hash, capacity);
@@ -458,11 +476,11 @@ namespace xcore
                     // Prioritize deleted before empty
                     if (ctrl->has_deleted())
                     {
-                        return {seq.offset(), ctrl->index_of_deleted(), seq.index()};
+                        return {(s32)seq.offset(), ctrl->index_of_deleted(), seq.index()};
                     }
                     else if (ctrl->has_empty())
                     {
-                        return {seq.offset(), ctrl->index_of_empty(), seq.index()};
+                        return {(s32)seq.offset(), ctrl->index_of_empty(), seq.index()};
                     }
                     seq.next();
                     ASSERTS(seq.index() <= capacity, "full table!");
@@ -570,14 +588,14 @@ namespace xcore
                                 if (target_ctrl->is_empty(target.index))
                                 {
                                     target_ctrl->set_used(target.index);
-                                    target_ctrl->set_item(current_item, target.index);
+                                    target_ctrl->set_ref(current_item, target.index);
                                     break;
                                 }
                                 
                                 target_ctrl->set_used(target.index);
 
                                 // replace the item with a new one and get the previous item
-                                current_item = target_ctrl->replace_item(current_item, target.index);
+                                current_item = target_ctrl->replace_ref(current_item, target.index);
                             }
                         }
                     }
