@@ -131,6 +131,33 @@ UNITTEST_SUITE_BEGIN(flat_hashmap)
                 CHECK_NOT_NULL(map.find(i));
             }
         }
+
+        UNITTEST_TEST(large_insert)
+        {
+            flat_hashmap_n::hashmap_t<s64, s64> map(100000);
+            const s32 n = 100000;
+            for (s32 i = 0; i < n; ++i)
+            {
+                CHECK_EQUAL(true, map.insert(i, i));
+            }
+            for (s32 i = 0; i < n; ++i)
+            {
+                CHECK_NOT_NULL(map.find(i));
+            }
+            for (s32 i = 0; i < n; i+=2)
+            {
+                CHECK_EQUAL(true, map.erase(i));
+            }
+            for (s32 i = 1; i < n; i+=2)
+            {
+                CHECK_NOT_NULL(map.find(i));
+            }
+            for (s32 i = 1; i < n; i+=2)
+            {
+                CHECK_EQUAL(true, map.erase(i));
+            }
+            CHECK_TRUE(map.empty());
+        }
     }
 }
 UNITTEST_SUITE_END

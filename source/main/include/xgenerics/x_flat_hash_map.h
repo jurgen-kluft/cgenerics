@@ -68,33 +68,72 @@ namespace xcore
         class ctrl_t
         {
         public:
-            union
-            {
-                u64 m_hash_QW[4];
-                u8  m_hash_B8[32];
-            };
-
-            u32 m_refs[32];
-
+            // 8 bytes
             u32 m_empty;
             u32 m_deleted;
 
-            void clear()
+            // 32 bytes
+            union
             {
-                m_hash_QW[0] = 0;
-                m_hash_QW[1] = 0;
-                m_hash_QW[2] = 0;
-                m_hash_QW[3] = 0;
-                m_empty   = 0xffffffff;
-                m_deleted = 0;
+                u32 m_hash_DW[8];
+                u8  m_hash_B8[32];
+            };
+
+            // You could easily make 3 bytes (max 16 million elements) per ref as follows:
+            //     // 96 bytes
+            //     u8          m_refs_h[32];
+            //     u16         m_refs_l[32];
+            //     inline u32  get_ref(s8 i) const { return (u32)m_refs_l[i] | ((u32)m_refs_l[i] << 16); }
+            //     inline void set_ref(u32 item_index, s8 i)
+            //     {
+            //         m_refs_l[i] = (item_index & 0xFFFF);
+            //         m_refs_h[i] = (u8)(item_index >> 16);
+            //     }
+            //     inline u32 replace_ref(u32 item_index, s8 i)
+            //     {
+            //         u32 const old_item = get_ref(i);
+            //         set_ref(item_index, i);
+            //         return old_item;
+            //     }
+
+            // Or even 2.5 bytes (max 1 million elements) per ref as follows:
+            //     // 80 bytes
+            //     u8          m_refs_h[16];
+            //     u16         m_refs_l[32];
+            //     inline u32  get_ref(s8 i) const { return (u32)m_refs_l[i] | ((u32)((m_refs_l[i >> 1] >> ((i & 1) * 4)) & 0xF) << 16); }
+            //     inline void set_ref(u32 item_index, s8 i)
+            //     {
+            //         m_refs_l[i]     = (item_index & 0xFFFF);
+            //         u8 const nibble = (u8)((item_index >> 16) & 0xF;
+            //         s8 const shift = ((i&1)*4);
+            //         u8 const mask = 0xF << shift;
+            //         m_refs_h[i>>1] = (m_refs_h[i>>1] & mask) | (nibble << shift);
+            //     }
+            //     inline u32 replace_ref(u32 item_index, s8 i)
+            //     {
+            //         u32 const old_item = get_ref(i);
+            //         set_ref(item_index, i);
+            //         return old_item;
+            //     }
+
+            // This is 4 bytes (max 4 billion elements) per ref
+
+            // 128 bytes
+            u32         m_refs[32];
+            inline u32  get_ref(s8 i) const { return m_refs[i]; }
+            inline void set_ref(u32 item_index, s8 i) { m_refs[i] = item_index; }
+            inline u32  replace_ref(u32 item_index, s8 i)
+            {
+                u32 const old_item = m_refs[i];
+                m_refs[i]          = item_index;
+                return old_item;
             }
 
             // Writing the 8 bit hash bit by bit over 8 different sequential u32 registers then it would be
             // easy to generate the mask, like:
             void set_hash(h2_t hash, s8 const i) { m_hash_B8[i] = hash; }
             void clr_hash(s8 const i) { m_hash_B8[i] = 0; }
-
-            u32 match(h2_t hash, u32 mask) const
+            u32  match(h2_t hash, u32 mask) const
             {
                 bitmask_t bitmask(mask);
                 for (s32 i : bitmask)
@@ -119,8 +158,16 @@ namespace xcore
             inline s8   index_of_empty() const { return (s8)xfindFirstBit(m_empty); }
             inline s8   index_of_empty_or_deleted() const { return (s8)xfindFirstBit(m_empty | m_deleted); }
 
-            inline void set_empty(s8 slot) { m_empty |= (1 << slot); m_deleted &= ~(1 << slot); }
-            inline void set_deleted(s8 slot) { m_deleted |= (1 << slot); m_empty &= ~(1 << slot); }
+            inline void set_empty(s8 slot)
+            {
+                m_empty |= (1 << slot);
+                m_deleted &= ~(1 << slot);
+            }
+            inline void set_deleted(s8 slot)
+            {
+                m_deleted |= (1 << slot);
+                m_empty &= ~(1 << slot);
+            }
             inline void set_used(s8 slot)
             {
                 m_empty &= ~(1 << slot);
@@ -133,18 +180,24 @@ namespace xcore
                 m_deleted      = full;
             }
 
-            inline u32 get_ref(s8 i) const { return m_refs[i]; }
-            inline void set_ref(u32 item_index, s8 i) { m_refs[i] = item_index; }
-            inline u32  replace_ref(u32 item_index, s8 i) { u32 const old_item = m_refs[i];  m_refs[i] = item_index; return old_item; }
+            void clear()
+            {
+                m_empty   = 0xffffffff;
+                m_deleted = 0;
+                for (s8 i = 0; i < 8; ++i)
+                    m_hash_DW[i] = 0;
+                for (s8 i = 0; i < 32; ++i)
+                    m_refs[i] = 0xDEADDEAD;
+            }
         };
 
-        class prober_t
+        class probe_t
         {
         public:
-            prober_t(u64 hash, u64 mask)
+            probe_t(u64 hash, u64 mask)
             {
                 ASSERTS(((mask + 1) & mask) == 0, "not a mask");
-                m_mask  = mask;
+                m_mask   = mask;
                 m_offset = hash & m_mask;
                 m_index  = 0;
             }
@@ -170,7 +223,7 @@ namespace xcore
         struct findinfo_t
         {
             s32 offset;
-            s8 index;
+            s8  index;
             u64 probe_length;
         };
 
@@ -195,52 +248,52 @@ namespace xcore
 
         template <typename Key, typename Value, typename Hasher = Fnv1aHash<Key>> class hashmap_t
         {
-            inline prober_t probe(u64 hash, u64 capacity) const { return prober_t(H1(hash, m_ctrls), capacity); }
+            inline probe_t probe(u64 hash, u64 capacity) const { return probe_t(H1(hash, m_ctrls), capacity); }
 
             array_t<ctrl_t>* m_ctrls;
             array_t<Key>*    m_keys;
             array_t<Value>*  m_values;
-            u64              m_size;
-            u64              m_capacity; // number of elements == (m_capacity + 1) * 32
-            u64              m_growth_left;
+            u32              m_size;
+            u32              m_capacity; // number of elements == (m_capacity + 1) * 32
+            u32              m_growth_left;
 
         public:
             // User expects capacity to be in the number of elements
-            hashmap_t(u32 capacity = 64)
+            hashmap_t(u32 size = 64)
             {
-                u32 const n = (capacity >> 5);
-                m_ctrls      = array_t<ctrl_t>::create(n, n);
-                m_keys       = array_t<Key>::create(0, n * 32);
-                m_values     = array_t<Value>::create(0, n * 32);
-                m_size       = 0;
-                m_capacity   = n - 1;
+                u32 const n = normalize_capacity((size >> 5) - 1) + 1;
+                m_ctrls     = array_t<ctrl_t>::create(n, n);
+                m_keys      = array_t<Key>::create(0, n * 32);
+                m_values    = array_t<Value>::create(0, n * 32);
+                m_size      = 0;
+                m_capacity  = n - 1;
                 reset_growth_left();
                 clear_ctrls(0, n);
             }
 
             bool empty() const { return !size(); }
-            u64  size() const { return m_size; }
-            u64  capacity() const { return m_capacity; }
-            u64  max_size() const { return (limits_t<u64>::maximum()); }
+            u32  size() const { return m_size; }
+            u32  capacity() const { return m_capacity; }
+            u32  max_size() const { return (limits_t<u32>::maximum()); }
             void reset_growth_left() { growth_left() = (size_to_grow((capacity() + 1) * 32) - m_size); }
-            u64& growth_left() { return m_growth_left; }
+            u32& growth_left() { return m_growth_left; }
 
             Value* find(const Key& key)
             {
                 Hasher     hasher;
                 u64 const  chash = hasher(key);
-                findinfo_t cfi = find_internal(key, chash);
+                findinfo_t cfi   = find_internal(key, chash);
                 if (cfi.offset < 0)
                     return nullptr;
-                ctrl_t const* cctrl = m_ctrls->get_item(cfi.offset);
-                u32 const entry_index = cctrl->get_ref(cfi.index);
+                ctrl_t const* cctrl       = m_ctrls->get_item(cfi.offset);
+                u32 const     entry_index = cctrl->get_ref(cfi.index);
                 return m_values->get_item(entry_index);
             }
 
             bool insert(Key const& key, Value const& value)
             {
                 Hasher     hasher;
-                u64 const  hash = hasher(key);
+                u64 const  hash    = hasher(key);
                 findinfo_t current = find_internal(key, hash);
                 if (current.offset >= 0)
                     return false;
@@ -267,29 +320,34 @@ namespace xcore
                     return false;
 
                 // current or 'c' element
-                Hasher     hasher;
-                u64 const  chash = hasher(key);
-                findinfo_t const cfi = find_internal(key, chash);
+                Hasher           hasher;
+                u64 const        chash = hasher(key);
+                findinfo_t const cfi   = find_internal(key, chash);
                 if (cfi.offset < 0)
                     return false;
                 ctrl_t* cctrl = m_ctrls->get_item(cfi.offset);
                 cctrl->set_deleted(cfi.index);
 
-                // end of 'e' element
-                u32 const ei = m_keys->size() - 1;
-                u64 const  ehash = hasher(*m_keys->get_item(ei));
-                findinfo_t const efi = find_internal(*m_keys->get_item(ei), ehash);
-                ctrl_t* ectrl = m_ctrls->get_item(efi.offset);
-
-                // Update the reference on the 'e' element
                 u32 const cei = cctrl->get_ref(cfi.index);
-                ectrl->set_ref(cei, efi.index);
-                
-                // Set current key/value with last key/value
-                m_keys->set_item(cei, *m_keys->get_item(ei));
-                m_values->set_item(cei, *m_values->get_item(ei));
+                u32 const ei  = m_keys->size() - 1;
+                if (cei != ei)
+                {
+                    // end of 'e' element
+                    u64 const        ehash = hasher(*m_keys->get_item(ei));
+                    findinfo_t const efi   = find_internal(*m_keys->get_item(ei), ehash);
+                    ASSERT(efi.offset >= 0 && efi.index >= 0);
+                    ctrl_t* ectrl = m_ctrls->get_item(efi.offset);
+
+                    // Update the reference on the 'e' element
+                    ectrl->set_ref(cei, efi.index);
+
+                    // Set current key/value with last key/value
+                    m_keys->set_item(cei, *m_keys->get_item(ei));
+                    m_values->set_item(cei, *m_values->get_item(ei));
+                }
                 m_keys->set_size(ei);
                 m_values->set_size(ei);
+                m_size--;
                 return true;
             }
 
@@ -416,10 +474,10 @@ namespace xcore
 
             // Given `capacity` of the table, returns the size (i.e. number of full slots)
             // at which we should grow the capacity.
-            inline bool is_valid_capacity(u64 n) const { return ((n + 1) & n) == 0 && n > 0; }
+            inline bool is_valid_capacity(u32 n) const { return ((n + 1) & n) == 0 && n > 0; }
             // Rounds up the capacity to the next power of 2 minus 1, with a minimum of 1.
-            inline u64 normalize_capacity(u64 n) const { return n ? (0xffffffffffffffffull >> xcountLeadingZeros(n)) : 1; }
-            inline u64 size_to_grow(u64 max_size) const
+            inline u32 normalize_capacity(u32 n) const { return n ? (0xffffffff >> xcountLeadingZeros(n)) : 1; }
+            inline u32 size_to_grow(u32 max_size) const
             {
                 return (max_size * 8 - max_size) / 8; // `n*7/8`
             }
@@ -444,8 +502,8 @@ namespace xcore
 
             inline findinfo_t find_internal(const Key& key, u64 hash) const
             {
-                h2_t const h    = H2(hash);
-                auto       seq  = probe(hash, m_capacity);
+                h2_t const h   = H2(hash);
+                auto       seq = probe(hash, m_capacity);
                 while (true)
                 {
                     ctrl_t*   ctrl    = m_ctrls->get_item(seq.offset());
@@ -463,7 +521,7 @@ namespace xcore
                     seq.next();
                     ASSERTS(seq.index() <= m_capacity, "full table!");
                 }
-                return {-1,-1,0};
+                return {-1, -1, 0};
             }
 
             inline findinfo_t find_first_non_full(u64 hash, u64 capacity) const
@@ -532,11 +590,11 @@ namespace xcore
                 ASSERT(m_capacity > 0);
 
                 u32 const oldsize = m_ctrls->size();
-                u32 const n       = (u32)(m_capacity + 1);
-                m_ctrls->set_capacity(n);
-                m_ctrls->set_size(n);
+                u32 const newsize = (u32)(m_capacity + 1);
+                m_ctrls->set_capacity(newsize);
+                m_ctrls->set_size(newsize);
 
-                clear_ctrls(oldsize, m_ctrls->size());
+                clear_ctrls(oldsize, newsize);
                 reset_ctrls(0, oldsize);
                 reset_growth_left();
             }
@@ -544,28 +602,28 @@ namespace xcore
             inline void set_ctrl(findinfo_t const& fi, h2_t hash, u32 item_index)
             {
                 ctrl_t* ctrl = m_ctrls->get_item(fi.offset);
-                ctrl->set_hash(hash, fi.index);
                 ctrl->set_used(fi.index);
-                ctrl->m_refs[fi.index] = item_index;
+                ctrl->set_hash(hash, fi.index);
+                ctrl->set_ref(item_index, fi.index);
             }
 
-            void resize(u64 new_capacity)
+            void resize(u32 new_capacity)
             {
                 ASSERT(is_valid_capacity(new_capacity));
 
-                const u64 old_capacity = m_capacity;
-                m_capacity              = new_capacity;
+                const u32 old_capacity = m_capacity;
+                m_capacity             = new_capacity;
                 initialize_slots();
 
-                // 
+                //
                 // The logic below supports hashing in-place.
-                // 
+                //
                 // When we rehash a 'deleted' element and find the group and slot we
                 // should want to insert it at, if that slot is 'deleted' as well we
                 // need to pop the one that is at that slot. If we encounter a slot that
                 // is marked as 'empty' we can simply set and continue at the top level
                 // finding a 'deleted' slot.
-                // 
+                //
 
                 Hasher hasher;
                 for (u32 g = 0; g <= old_capacity; ++g)
@@ -577,12 +635,12 @@ namespace xcore
                         {
                             ctrl->set_empty(i);
 
-                            u32     current_item = ctrl->m_refs[i];
+                            u32 current_item = ctrl->m_refs[i];
                             while (true)
                             {
-                                u64 const hash = hasher(*m_keys->get_item(current_item));
-                                findinfo_t target = find_first_non_full(hash, m_capacity);
-                                ctrl_t* target_ctrl = m_ctrls->get_item(target.offset);
+                                u64 const  hash        = hasher(*m_keys->get_item(current_item));
+                                findinfo_t target      = find_first_non_full(hash, m_capacity);
+                                ctrl_t*    target_ctrl = m_ctrls->get_item(target.offset);
 
                                 target_ctrl->set_hash(H2(hash), target.index);
                                 if (target_ctrl->is_empty(target.index))
@@ -591,7 +649,7 @@ namespace xcore
                                     target_ctrl->set_ref(current_item, target.index);
                                     break;
                                 }
-                                
+
                                 target_ctrl->set_used(target.index);
 
                                 // replace the item with a new one and get the previous item
