@@ -35,7 +35,7 @@ UNITTEST_SUITE_BEGIN(flat_hashmap)
         }
         UNITTEST_TEST(group_empty)
         {
-            flat_hashmap_n::group_t group;
+            flat_hashmap_n::ctrl_t group;
             group.clear();
 
             CHECK_EQUAL(true, group.has_empty());
@@ -54,7 +54,7 @@ UNITTEST_SUITE_BEGIN(flat_hashmap)
 
         UNITTEST_TEST(group_test_empty)
         {
-            flat_hashmap_n::group_t group;
+            flat_hashmap_n::ctrl_t group;
             group.clear();
 
             CHECK_EQUAL(true, group.has_empty());
@@ -69,7 +69,7 @@ UNITTEST_SUITE_BEGIN(flat_hashmap)
 
         UNITTEST_TEST(group_test_deleted)
         {
-            flat_hashmap_n::group_t group;
+            flat_hashmap_n::ctrl_t group;
             group.clear();
 
             CHECK_EQUAL(true, group.has_empty());
