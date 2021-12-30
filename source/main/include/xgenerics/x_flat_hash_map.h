@@ -62,12 +62,14 @@ namespace xcore
 
         typedef u8 h2_t;
 
-        inline u64  H1(u64 hash, const void* unique_stable_ptr) { return (hash >> 8) ^ hash_seed(unique_stable_ptr); }
+        inline u64  H1(u64 hash, const void* unique_stable_ptr) { return (hash >> 8) /*^ hash_seed(unique_stable_ptr)*/; }
         inline h2_t H2(u64 hash) { return hash & 0xFF; }
 
         class ctrl_t
         {
         public:
+            enum { cWidth = 32 };
+
             // 8 bytes
             u32 m_empty;
             u32 m_deleted;
@@ -75,8 +77,8 @@ namespace xcore
             // 32 bytes
             union
             {
-                u32 m_hash_DW[8];
-                u8  m_hash_B8[32];
+                u32 m_hash_DW[cWidth/2];
+                u8  m_hash_B8[cWidth];
             };
 
             // You could easily make 3 bytes (max 16 million elements) per ref as follows:
@@ -119,7 +121,7 @@ namespace xcore
             // This is 4 bytes (max 4 billion elements) per ref
 
             // 128 bytes
-            u32         m_refs[32];
+            u32         m_refs[cWidth];
             inline u32  get_ref(s8 i) const { return m_refs[i]; }
             inline void set_ref(u32 item_index, s8 i) { m_refs[i] = item_index; }
             inline u32  replace_ref(u32 item_index, s8 i)
@@ -132,10 +134,11 @@ namespace xcore
             // Writing the 8 bit hash bit by bit over 8 different sequential u32 registers then it would be
             // easy to generate the mask, like:
             void set_hash(h2_t hash, s8 const i) { m_hash_B8[i] = hash; }
+            h2_t get_hash(s8 const i) const { return m_hash_B8[i]; }
             u32  match(h2_t hash, u32 mask) const
             {
                 bitmask_t bitmask(mask);
-                for (s32 i : bitmask)
+                for (s8 i : bitmask)
                 {
                     if (m_hash_B8[i] != hash)
                         mask &= ~(1 << i);
@@ -181,9 +184,9 @@ namespace xcore
             {
                 m_empty   = 0xffffffff;
                 m_deleted = 0;
-                for (s8 i = 0; i < 8; ++i)
+                for (s8 i = 0; i < cWidth/2; ++i)
                     m_hash_DW[i] = 0;
-                for (s8 i = 0; i < 32; ++i)
+                for (s8 i = 0; i < cWidth; ++i)
                     m_refs[i] = 0xDEADDEAD;
             }
         };
@@ -240,7 +243,7 @@ namespace xcore
         template <typename Key> class Fnv1aHash
         {
         public:
-            inline u64 operator()(const Key& key) const { return FNV1A64((xbyte const*)&key, sizeof(Key), 981039); }
+            inline u64 operator()(const Key* key) const { return FNV1A64((xbyte const*)key, sizeof(Key), 981039); }
         };
 
         template <typename Key, typename Value, typename Hasher = Fnv1aHash<Key>> class hashmap_t
@@ -251,7 +254,7 @@ namespace xcore
             array_t<Key>*    m_keys;
             array_t<Value>*  m_values;
             u32              m_size;
-            u32              m_capacity; // number of elements == (m_capacity + 1) * 32
+            u32              m_capacity; // number of elements == (m_capacity + 1) * ctrl_t::cWidth
             u32              m_growth_left;
 
         public:
@@ -260,8 +263,8 @@ namespace xcore
             {
                 u32 const n = normalize_capacity((size >> 5) - 1) + 1;
                 m_ctrls     = array_t<ctrl_t>::create(n, n);
-                m_keys      = array_t<Key>::create(0, n * 32);
-                m_values    = array_t<Value>::create(0, n * 32);
+                m_keys      = array_t<Key>::create(0, n * ctrl_t::cWidth);
+                m_values    = array_t<Value>::create(0, n * ctrl_t::cWidth);
                 m_size      = 0;
                 m_capacity  = n - 1;
                 reset_growth_left();
@@ -271,14 +274,14 @@ namespace xcore
             bool empty() const { return !size(); }
             u32  size() const { return m_size; }
             u32  capacity() const { return m_capacity; }
-            u32  max_size() const { return (limits_t<u32>::maximum()); }
-            void reset_growth_left() { growth_left() = (size_to_grow((capacity() + 1) * 32) - m_size); }
+            u32  max_size() const { return (0x7fffffff); }
+            void reset_growth_left() { growth_left() = (size_to_grow((capacity() + 1) * ctrl_t::cWidth) - m_size); }
             u32& growth_left() { return m_growth_left; }
 
             Value* find(const Key& key)
             {
                 Hasher     hasher;
-                u64 const  chash = hasher(key);
+                u64 const  chash = hasher(&key);
                 findinfo_t cfi   = find_internal(key, chash);
                 if (cfi.offset < 0)
                     return nullptr;
@@ -290,16 +293,16 @@ namespace xcore
             bool insert(Key const& key, Value const& value)
             {
                 Hasher     hasher;
-                u64 const  hash    = hasher(key);
+                u64 const  hash    = hasher(&key);
                 findinfo_t current = find_internal(key, hash);
                 if (current.offset >= 0)
                     return false;
 
-                findinfo_t target = find_first_non_full(hash, m_capacity);
+                findinfo_t target = find_first_non_used(hash, m_capacity);
                 if (growth_left() == 0 && !is_deleted(target.offset, target.index))
                 {
                     rehash_and_grow_if_necessary();
-                    target = find_first_non_full(hash, m_capacity);
+                    target = find_first_non_used(hash, m_capacity);
                 }
                 m_size++;
                 ASSERT(target.offset >= 0 && target.index >= 0);
@@ -319,7 +322,7 @@ namespace xcore
 
                 // current or 'c' element
                 Hasher           hasher;
-                u64 const        chash = hasher(key);
+                u64 const        chash = hasher(&key);
                 findinfo_t const cfi   = find_internal(key, chash);
                 if (cfi.offset < 0)
                     return false;
@@ -331,7 +334,7 @@ namespace xcore
                 if (cei != ei)
                 {
                     // end of 'e' element
-                    u64 const        ehash = hasher(*m_keys->get_item(ei));
+                    u64 const        ehash = hasher(m_keys->get_item(ei));
                     findinfo_t const efi   = find_internal(*m_keys->get_item(ei), ehash);
                     ASSERT(efi.offset >= 0 && efi.index >= 0);
                     ctrl_t* ectrl = m_ctrls->get_item(efi.offset);
@@ -447,7 +450,7 @@ namespace xcore
 
             protected:
                 friend class hashmap_t;
-                const_iterator(const array_t<Key>* keys, const array_t<Value>* values)
+                const_iterator(const array_t<Key>* keys, const array_t<Value>* values, u32 index = 0)
                     : m_keys(keys)
                     , m_values(values)
                     , m_index(index)
@@ -512,7 +515,7 @@ namespace xcore
                     bitmask_t bitmask = ctrl->match(h, ctrl->get_used());
                     for (s8 i : bitmask)
                     {
-                        const u32  other_ref = m_ctrls->get_item((u32)seq.offset())->m_refs[i];
+                        const u32  other_ref = ctrl->get_ref(i);
                         const Key* other_key = m_keys->get_item(other_ref);
                         if (key == *other_key)
                             return {(s32)seq.offset(), i, seq.index()};
@@ -526,7 +529,7 @@ namespace xcore
                 return {-1, -1, 0};
             }
 
-            inline findinfo_t find_first_non_full(u64 hash, u64 capacity) const
+            inline findinfo_t find_first_non_used(u64 hash, u64 capacity) const
             {
                 auto seq = probe(hash, capacity);
                 while (true)
@@ -541,6 +544,27 @@ namespace xcore
                     else if (ctrl->has_empty())
                     {
                         return {(s32)seq.offset(), ctrl->index_of_empty(), seq.index()};
+                    }
+                    seq.next();
+                    ASSERTS(seq.index() <= capacity, "full table!");
+                }
+            }
+
+            inline findinfo_t find_first_non_used_rehash(u64 hash, u64 capacity) const
+            {
+                auto seq = probe(hash, capacity);
+                while (true)
+                {
+                    ctrl_t* ctrl = m_ctrls->get_item(seq.offset());
+
+                    // Prioritize empty before deleted
+                    if (ctrl->has_empty())
+                    {
+                        return {(s32)seq.offset(), ctrl->index_of_empty(), seq.index()};
+                    }
+                    else if (ctrl->has_deleted())
+                    {
+                        return {(s32)seq.offset(), ctrl->index_of_deleted(), seq.index()};
                     }
                     seq.next();
                     ASSERTS(seq.index() <= capacity, "full table!");
@@ -595,6 +619,8 @@ namespace xcore
                 u32 const newsize = (u32)(m_capacity + 1);
                 m_ctrls->set_capacity(newsize);
                 m_ctrls->set_size(newsize);
+                m_keys->set_capacity(newsize * ctrl_t::cWidth);
+                m_values->set_capacity(newsize * ctrl_t::cWidth);
 
                 clear_ctrls(oldsize, newsize);
                 reset_ctrls(0, oldsize);
@@ -620,29 +646,23 @@ namespace xcore
                 //
                 // The logic below supports hashing in-place.
                 //
-                // When we rehash a 'deleted' element and find the group and slot we
-                // should want to insert it at, if that slot is 'deleted' as well we
-                // need to pop the one that is at that slot. If we encounter a slot that
-                // is marked as 'empty' we can simply set and continue at the top level
-                // finding a 'deleted' slot.
-                //
 
                 Hasher hasher;
                 for (u32 g = 0; g <= old_capacity; ++g)
                 {
                     ctrl_t* ctrl = m_ctrls->get_item(g);
-                    for (s8 i = 0; i < 32; ++i)
+                    for (s8 i = 0; i < ctrl_t::cWidth; ++i)
                     {
                         if (ctrl->is_deleted(i))
                         {
                             ctrl->set_empty(i);
 
-                            u32 current_item = ctrl->m_refs[i];
+                            u32 current_item = ctrl->get_ref(i);
                             while (true)
                             {
-                                u64 const  hash        = hasher(*m_keys->get_item(current_item));
-                                findinfo_t target      = find_first_non_full(hash, m_capacity);
-                                ctrl_t*    target_ctrl = m_ctrls->get_item(target.offset);
+                                u64 const        hash        = hasher(m_keys->get_item(current_item));
+                                findinfo_t const target      = find_first_non_used_rehash(hash, m_capacity);
+                                ctrl_t*          target_ctrl = m_ctrls->get_item(target.offset);
 
                                 target_ctrl->set_hash(H2(hash), target.index);
                                 if (target_ctrl->is_empty(target.index))
@@ -654,6 +674,7 @@ namespace xcore
 
                                 target_ctrl->set_used(target.index);
 
+                                // this entry was 'deleted', so it contains an existing item
                                 // replace the item with a new one and get the previous item
                                 current_item = target_ctrl->replace_ref(current_item, target.index);
                             }
