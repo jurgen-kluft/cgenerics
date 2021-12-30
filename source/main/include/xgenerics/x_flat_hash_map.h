@@ -119,10 +119,8 @@ namespace xcore
             inline s8   index_of_empty() const { return (s8)xfindFirstBit(m_empty); }
             inline s8   index_of_empty_or_deleted() const { return (s8)xfindFirstBit(m_empty | m_deleted); }
 
-            inline void set_empty(s8 slot) { m_empty |= (1 << slot); }
-            inline void set_not_empty(s8 slot) { m_empty &= ~(1 << slot); }
-            inline void set_deleted(s8 slot) { m_deleted |= (1 << slot); }
-            inline void set_not_deleted(s8 slot) { m_deleted &= ~(1 << slot); }
+            inline void set_empty(s8 slot) { m_empty |= (1 << slot); m_deleted &= ~(1 << slot); }
+            inline void set_deleted(s8 slot) { m_deleted |= (1 << slot); m_empty &= ~(1 << slot); }
             inline void set_used(s8 slot)
             {
                 m_empty &= ~(1 << slot);
@@ -134,6 +132,9 @@ namespace xcore
                 m_empty        = m_deleted;
                 m_deleted      = full;
             }
+
+            inline void set_item(u32 item_index, s8 i) { m_refs[i] = item_index; }
+            inline u32  replace_item(u32 item_index, s8 i) { u32 const old_item = m_refs[i];  m_refs[i] = item_index; return old_item;  }
         };
 
         class prober_t
@@ -168,7 +169,7 @@ namespace xcore
         struct findinfo_t
         {
             u32 offset;
-            u32 index;
+            s8 index;
             u64 probe_length;
         };
 
@@ -220,7 +221,7 @@ namespace xcore
             u64  size() const { return m_size; }
             u64  capacity() const { return m_capacity; }
             u64  max_size() const { return (limits_t<u64>::maximum()); }
-            void reset_growth_left() { growth_left() = (size_to_grow(capacity() * 32) - m_size); }
+            void reset_growth_left() { growth_left() = (size_to_grow((capacity() + 1) * 32) - m_size); }
             u64& growth_left() { return m_growth_left; }
 
             Value* find(const Key& key)
@@ -231,20 +232,20 @@ namespace xcore
                 auto       seq  = probe(hash, m_capacity);
                 while (true)
                 {
-                    ctrl_t*   ctrl    = m_ctrls(seq.offset());
+                    ctrl_t*   ctrl    = m_ctrls->get_item(seq.offset());
                     bitmask_t bitmask = ctrl->match(h, ctrl->get_used());
                     for (u32 i : bitmask)
                     {
                         const u32  other_ref = m_ctrls->get_item((u32)seq.offset())->m_refs[i];
-                        const Key& other_key = m_keys->get_item(other_ref);
-                        if (key == other_key)
+                        const Key* other_key = m_keys->get_item(other_ref);
+                        if (key == *other_key)
                             return m_values->get_item(other_ref);
                     }
                     if (ctrl->has_empty())
                         break;
 
                     seq.next();
-                    ASSERTS(seq.index() <= m_capacity * 32, "full table!");
+                    ASSERTS(seq.index() <= m_capacity, "full table!");
                 }
                 return nullptr;
             }
@@ -286,14 +287,6 @@ namespace xcore
                 m_values->add_item(value);
                 set_ctrl(target, H2(hash), item_index);
                 return true;
-            }
-
-            void set_ctrl(findinfo_t const& fi, h2_t hash, u32 item_index)
-            {
-                ctrl_t* ctrl = m_ctrls->get_item(fi.offset);
-                ctrl->set_hash(hash, fi.index);
-                ctrl->set_used(fi.index);
-                ctrl->m_refs[fi.index] = item_index;
             }
 
             bool erase(Key const& key)
@@ -465,11 +458,11 @@ namespace xcore
                     // Prioritize deleted before empty
                     if (ctrl->has_deleted())
                     {
-                        return {seq.offset(), (u32)ctrl->index_of_deleted(), seq.index()};
+                        return {seq.offset(), ctrl->index_of_deleted(), seq.index()};
                     }
                     else if (ctrl->has_empty())
                     {
-                        return {seq.offset(), (u32)ctrl->index_of_empty(), seq.index()};
+                        return {seq.offset(), ctrl->index_of_empty(), seq.index()};
                     }
                     seq.next();
                     ASSERTS(seq.index() <= capacity, "full table!");
@@ -530,6 +523,14 @@ namespace xcore
                 reset_growth_left();
             }
 
+            inline void set_ctrl(findinfo_t const& fi, h2_t hash, u32 item_index)
+            {
+                ctrl_t* ctrl = m_ctrls->get_item(fi.offset);
+                ctrl->set_hash(hash, fi.index);
+                ctrl->set_used(fi.index);
+                ctrl->m_refs[fi.index] = item_index;
+            }
+
             void resize(u64 new_capacity)
             {
                 ASSERT(is_valid_capacity(new_capacity));
@@ -538,37 +539,46 @@ namespace xcore
                 m_capacity              = new_capacity;
                 initialize_slots();
 
+                // 
+                // The logic below supports hashing in-place.
+                // 
                 // When we rehash a 'deleted' element and find the group and slot we
-                // should want to insert it at we need to pop the one that is at
-                // that slot if it is marked as deleted. If we encounter a slot that is
-                // marked as 'empty' we can simply insert and continue at the top level
+                // should want to insert it at, if that slot is 'deleted' as well we
+                // need to pop the one that is at that slot. If we encounter a slot that
+                // is marked as 'empty' we can simply set and continue at the top level
                 // finding a 'deleted' slot.
+                // 
 
-                u64    total_probe_length = 0;
                 Hasher hasher;
-                for (u64 i = 0; i != (old_capacity * 32); ++i)
+                for (u32 g = 0; g <= old_capacity; ++g)
                 {
-                    if (is_deleted((u32)(i >> 5), (u32)(i & 0x1F)))
+                    ctrl_t* ctrl = m_ctrls->get_item(g);
+                    for (s8 i = 0; i < 32; ++i)
                     {
-                        ctrl_t* ctrl         = m_ctrls->get_item((u32)(i >> 5));
-                        u32     current_item = ctrl->m_refs[(u32)(i & 0x1F)];
-                        while (true)
+                        if (ctrl->is_deleted(i))
                         {
-                            u64 hash = hasher(*m_keys->get_item(current_item));
+                            ctrl->set_empty(i);
 
-                            findinfo_t target = find_first_non_full(hash, m_capacity);
-                            total_probe_length += target.probe_length;
-                            if (is_empty(target.offset, target.index))
+                            u32     current_item = ctrl->m_refs[i];
+                            while (true)
                             {
-                                set_ctrl(target, H2(hash), current_item);
-                                break;
-                            }
-                            ctrl_t* target_refs   = m_ctrls->get_item(target.offset);
-                            u32     previous_item = target_refs->m_refs[target.index];
-                            set_ctrl(target, H2(hash), current_item);
+                                u64 const hash = hasher(*m_keys->get_item(current_item));
+                                findinfo_t target = find_first_non_full(hash, m_capacity);
+                                ctrl_t* target_ctrl = m_ctrls->get_item(target.offset);
 
-                            // take the previous item that was at this slot and insert it
-                            current_item = previous_item;
+                                target_ctrl->set_hash(H2(hash), target.index);
+                                if (target_ctrl->is_empty(target.index))
+                                {
+                                    target_ctrl->set_used(target.index);
+                                    target_ctrl->set_item(current_item, target.index);
+                                    break;
+                                }
+                                
+                                target_ctrl->set_used(target.index);
+
+                                // replace the item with a new one and get the previous item
+                                current_item = target_ctrl->replace_item(current_item, target.index);
+                            }
                         }
                     }
                 }
