@@ -29,7 +29,18 @@ UNITTEST_SUITE_BEGIN(flat_hashmap)
                     ctrl.set_hash((u8)h, p);
                     u32 match = ctrl.match((u8)h, 0xffffffff);
                     CHECK_EQUAL((u32)(1 << p), match);
-                    ctrl.clr_hash(p);
+                    ctrl.set_hash(0, p);
+                }
+            }
+
+            for (s32 h = 1; h < 255; h++)
+            {
+                for (s32 p = 0; p < 32; p++)
+                {
+                    ctrl.set_hash((u8)h, p);
+                    u32 match = ctrl.match((u8)h, 1<<p);
+                    CHECK_EQUAL((u32)(1 << p), match);
+                    ctrl.set_hash(0, p);
                 }
             }
         }
@@ -134,11 +145,12 @@ UNITTEST_SUITE_BEGIN(flat_hashmap)
 
         UNITTEST_TEST(large_insert)
         {
-            flat_hashmap_n::hashmap_t<s64, s64> map(100000);
             const s32 n = 100000;
+            flat_hashmap_n::hashmap_t<s32, s32> map;
             for (s32 i = 0; i < n; ++i)
             {
                 CHECK_EQUAL(true, map.insert(i, i));
+                CHECK_NOT_NULL(map.find(i));
             }
             for (s32 i = 0; i < n; ++i)
             {
@@ -157,6 +169,25 @@ UNITTEST_SUITE_BEGIN(flat_hashmap)
                 CHECK_EQUAL(true, map.erase(i));
             }
             CHECK_TRUE(map.empty());
+        }
+
+        UNITTEST_TEST(const_iterator)
+        {
+            const s32 n = 100000;
+            flat_hashmap_n::hashmap_t<s32, s32> map(n);
+            for (s32 i = 0; i < n; ++i)
+            {
+                CHECK_EQUAL(true, map.insert(i, i));
+            }
+
+            auto iter = map.begin();
+            auto end = map.end();
+            while (iter < end)
+            {
+                
+                ++iter;
+            }
+
         }
     }
 }

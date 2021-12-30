@@ -132,7 +132,6 @@ namespace xcore
             // Writing the 8 bit hash bit by bit over 8 different sequential u32 registers then it would be
             // easy to generate the mask, like:
             void set_hash(h2_t hash, s8 const i) { m_hash_B8[i] = hash; }
-            void clr_hash(s8 const i) { m_hash_B8[i] = 0; }
             u32  match(h2_t hash, u32 mask) const
             {
                 bitmask_t bitmask(mask);
@@ -156,7 +155,6 @@ namespace xcore
             inline bool is_empty_or_delete(s8 slot) const { return ((m_empty | m_deleted) & (1 << slot)) != 0; }
             inline s8   index_of_deleted() const { return (s8)xfindFirstBit(m_deleted); }
             inline s8   index_of_empty() const { return (s8)xfindFirstBit(m_empty); }
-            inline s8   index_of_empty_or_deleted() const { return (s8)xfindFirstBit(m_empty | m_deleted); }
 
             inline void set_empty(s8 slot)
             {
@@ -173,11 +171,10 @@ namespace xcore
                 m_empty &= ~(1 << slot);
                 m_deleted &= ~(1 << slot);
             }
-            inline void deleted_to_empty_and_full_to_deleted()
+            inline void deleted_to_empty_and_used_to_deleted()
             {
-                u32 const full = ~(m_empty | m_deleted);
-                m_empty        = m_deleted;
-                m_deleted      = full;
+                m_empty |= m_deleted;
+                m_deleted = ~m_empty;
             }
 
             void clear()
@@ -304,7 +301,8 @@ namespace xcore
                     rehash_and_grow_if_necessary();
                     target = find_first_non_full(hash, m_capacity);
                 }
-                ++m_size;
+                m_size++;
+                ASSERT(target.offset >= 0 && target.index >= 0);
                 growth_left() -= is_empty(target.offset, target.index);
 
                 u32 const item_index = m_keys->size();
@@ -385,14 +383,16 @@ namespace xcore
                     return i;
                 }
 
+                bool operator<(const iterator& other) const { return m_index < other.m_index; }
                 bool operator==(const iterator& other) const { return m_keys == other.m_keys && m_values == other.m_values && m_index == other.m_index; }
                 bool operator!=(const iterator& other) const { return m_keys != other.m_keys || m_values != other.m_values || m_index != other.m_index; }
 
-            private:
+            protected:
+                friend class hashmap_t;
                 iterator(array_t<Key>* keys, array_t<Value>* values, u32 index = 0)
                     : m_keys(keys)
                     , m_values(values)
-                    , m_index(0)
+                    , m_index(index)
                 {
                 }
 
@@ -441,14 +441,16 @@ namespace xcore
                     return i;
                 }
 
+                bool operator<(const const_iterator& other) const { return m_index < other.m_index; }
                 bool operator==(const const_iterator& other) const { return m_keys == other.m_keys && m_values == other.m_values && m_index == other.m_index; }
                 bool operator!=(const const_iterator& other) const { return m_keys != other.m_keys || m_values != other.m_values || m_index != other.m_index; }
 
-            private:
+            protected:
+                friend class hashmap_t;
                 const_iterator(const array_t<Key>* keys, const array_t<Value>* values)
                     : m_keys(keys)
                     , m_values(values)
-                    , m_index(0)
+                    , m_index(index)
                 {
                 }
 
@@ -479,22 +481,22 @@ namespace xcore
             inline u32 normalize_capacity(u32 n) const { return n ? (0xffffffff >> xcountLeadingZeros(n)) : 1; }
             inline u32 size_to_grow(u32 max_size) const
             {
-                return (max_size * 8 - max_size) / 8; // `n*7/8`
+                return (u32)(((u64)max_size * 8 - max_size) / 8); // `n*7/8`
             }
 
-            inline bool is_used(u32 offset, u32 index) const
+            inline bool is_used(u32 offset, s8 index) const
             {
                 ctrl_t* ctrl = m_ctrls->get_item(offset);
                 return ctrl->is_used(index);
             }
 
-            inline bool is_empty(u32 offset, u32 index) const
+            inline bool is_empty(u32 offset, s8 index) const
             {
                 ctrl_t* ctrl = m_ctrls->get_item(offset);
                 return ctrl->is_empty(index);
             }
 
-            inline bool is_deleted(u32 offset, u32 index) const
+            inline bool is_deleted(u32 offset, s8 index) const
             {
                 ctrl_t* ctrl = m_ctrls->get_item(offset);
                 return ctrl->is_deleted(index);
@@ -549,14 +551,14 @@ namespace xcore
             {
                 if (m_capacity == 0)
                 {
-                    resize(32);
+                    resize(1);
                 }
-                else if (m_capacity > 1 && ((size() * u64{32}) <= ((m_capacity * 32) * u64{25})))
-                {
-                    // Squash DELETED without growing if there is enough capacity.
-                    //
-                    // drop_deletes_without_resize();
-                }
+                // else if (m_capacity > 1 && ((size() * u64{32}) <= ((m_capacity * 32) * u64{25})))
+                //{
+                //     // Squash DELETED without growing if there is enough capacity.
+                //     //
+                //     // drop_deletes_without_resize();
+                // }
                 else
                 {
                     // Otherwise grow the container.
@@ -571,7 +573,7 @@ namespace xcore
                 for (u32 i = from; i < to; i++)
                 {
                     ctrl_t* ctrl = m_ctrls->get_item(i);
-                    ctrl->deleted_to_empty_and_full_to_deleted();
+                    ctrl->deleted_to_empty_and_used_to_deleted();
                 }
             }
 
