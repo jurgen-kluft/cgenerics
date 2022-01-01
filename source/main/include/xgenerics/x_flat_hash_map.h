@@ -77,7 +77,7 @@ namespace xcore
             // 32 bytes
             union
             {
-                u32 m_hash_DW[cWidth/2];
+                u32 m_hash_DW[cWidth/4];
                 u8  m_hash_B8[cWidth];
             };
 
@@ -131,8 +131,6 @@ namespace xcore
                 return old_item;
             }
 
-            // Writing the 8 bit hash bit by bit over 8 different sequential u32 registers then it would be
-            // easy to generate the mask, like:
             void set_hash(h2_t hash, s8 const i) { m_hash_B8[i] = hash; }
             h2_t get_hash(s8 const i) const { return m_hash_B8[i]; }
             u32  match(h2_t hash, u32 mask) const
@@ -184,7 +182,7 @@ namespace xcore
             {
                 m_empty   = 0xffffffff;
                 m_deleted = 0;
-                for (s8 i = 0; i < cWidth/2; ++i)
+                for (s8 i = 0; i < cWidth/4; ++i)
                     m_hash_DW[i] = 0;
                 for (s8 i = 0; i < cWidth; ++i)
                     m_refs[i] = 0xDEADDEAD;
@@ -307,6 +305,10 @@ namespace xcore
                 m_size++;
                 ASSERT(target.offset >= 0 && target.index >= 0);
                 growth_left() -= is_empty(target.offset, target.index);
+
+                // What to do when the keys and values arrays have no
+                // room left to add an item? Increase the capacity?
+                ASSERT(m_keys->size() < m_keys->cap_cur());
 
                 u32 const item_index = m_keys->size();
                 m_keys->add_item(key);
@@ -619,8 +621,14 @@ namespace xcore
                 u32 const newsize = (u32)(m_capacity + 1);
                 m_ctrls->set_capacity(newsize);
                 m_ctrls->set_size(newsize);
-                m_keys->set_capacity(newsize * ctrl_t::cWidth);
-                m_values->set_capacity(newsize * ctrl_t::cWidth);
+
+                // We are taking 7/8 of the capacity:
+                // 65_536 * 7/8 = 57344
+                // 1_28_000 * 7/8 = 112000
+                // 1_000_000 * 7/8 = 875000
+                u32 const kvsize = size_to_grow(newsize * ctrl_t::cWidth);
+                m_keys->set_capacity(kvsize);
+                m_values->set_capacity(kvsize);
 
                 clear_ctrls(oldsize, newsize);
                 reset_ctrls(0, oldsize);

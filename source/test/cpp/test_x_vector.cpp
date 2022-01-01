@@ -23,7 +23,6 @@ UNITTEST_SUITE_BEGIN(vector)
 
             s32 i = 0;
             v.push_back(i);
-
         }
 
     }
