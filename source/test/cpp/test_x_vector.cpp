@@ -1,9 +1,9 @@
-#include "xbase/x_allocator.h"
+#include "cbase/c_allocator.h"
 
-#include "xgenerics/x_hash_map.h"
-#include "xgenerics/x_vector.h"
+#include "cgenerics/c_hash_map.h"
+#include "cgenerics/c_vector.h"
 
-#include "xunittest/xunittest.h"
+#include "cunittest/xunittest.h"
 
 using namespace ncore;
 

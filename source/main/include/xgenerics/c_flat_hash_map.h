@@ -1,17 +1,17 @@
 #ifndef __X_GENERICS_CONTAINERS_FLAT_HASH_MAP_H__
 #define __X_GENERICS_CONTAINERS_FLAT_HASH_MAP_H__
-#include "xbase/x_target.h"
+#include "cbase/c_target.h"
 #ifdef USE_PRAGMA_ONCE
 #pragma once
 #endif
 
-#include "xbase/x_allocator.h"
-#include "xbase/x_debug.h"
-#include "xbase/x_darray.h"
-#include "xbase/x_hash.h"
-#include "xbase/x_integer.h"
-#include "xbase/x_math.h"
-#include "xbase/x_memory.h"
+#include "cbase/c_allocator.h"
+#include "cbase/c_debug.h"
+#include "cbase/c_darray.h"
+#include "cbase/c_hash.h"
+#include "cbase/c_integer.h"
+#include "cbase/c_math.h"
+#include "cbase/c_memory.h"
 
 namespace ncore
 {

@@ -1,10 +1,10 @@
-#include "xbase/x_allocator.h"
-#include "xbase/x_darray.h"
+#include "cbase/c_allocator.h"
+#include "cbase/c_darray.h"
 
-#include "xgenerics/x_flat_hash_map.h"
-#include "xgenerics/x_vector.h"
+#include "cgenerics/c_flat_hash_map.h"
+#include "cgenerics/c_vector.h"
 
-#include "xunittest/xunittest.h"
+#include "cunittest/xunittest.h"
 
 using namespace ncore;
 

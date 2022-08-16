@@ -1,11 +1,11 @@
 #ifndef __X_GENERICS_VECTOR_H__
 #define __X_GENERICS_VECTOR_H__
-#include "xbase/x_target.h"
+#include "cbase/c_target.h"
 #ifdef USE_PRAGMA_ONCE
 #pragma once
 #endif
 
-#include "xbase/x_math.h"
+#include "cbase/c_math.h"
 
 namespace ncore
 {

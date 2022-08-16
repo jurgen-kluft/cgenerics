@@ -1,9 +1,9 @@
-#include "xbase/x_target.h"
-#include "xbase/x_allocator.h"
-#include "xbase/x_context.h"
-#include "xbase/x_memory.h"
+#include "cbase/c_target.h"
+#include "cbase/c_allocator.h"
+#include "cbase/c_context.h"
+#include "cbase/c_memory.h"
 
-#include "xgenerics/x_vector.h"
+#include "cgenerics/c_vector.h"
 
 namespace ncore
 {
