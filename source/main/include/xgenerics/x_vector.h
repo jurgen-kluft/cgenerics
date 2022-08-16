@@ -7,7 +7,7 @@
 
 #include "xbase/x_math.h"
 
-namespace xcore
+namespace ncore
 {
     template <typename T> inline void value_copy(T* dst, T const* src, s32 item_count)
     {
@@ -40,7 +40,7 @@ namespace xcore
 
     protected:
         vector_base_t(u32 sizeofitem)
-            : m_p(NULL)
+            : m_p(nullptr)
             , m_size(0)
             , m_sizeof(sizeofitem)
             , m_capacity(0)
@@ -267,8 +267,8 @@ namespace xcore
 
         inline s32 find(const void* item) const
         {
-            const xbyte* p     = (xbyte*)m_p;
-            const xbyte* p_end = (xbyte*)m_p + m_size * m_sizeof;
+            const u8* p     = (u8*)m_p;
+            const u8* p_end = (u8*)m_p + m_size * m_sizeof;
 
             u32 index = 0;
             while (p != p_end)
@@ -294,6 +294,6 @@ namespace xcore
         }
     };
 
-} // namespace xcore
+} // namespace ncore
 
 #endif // __X_GENERICS_VECTOR_H__

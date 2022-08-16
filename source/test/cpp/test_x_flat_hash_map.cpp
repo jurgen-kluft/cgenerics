@@ -6,9 +6,9 @@
 
 #include "xunittest/xunittest.h"
 
-using namespace xcore;
+using namespace ncore;
 
-extern xcore::alloc_t* gTestAllocator;
+extern ncore::alloc_t* gTestAllocator;
 
 UNITTEST_SUITE_BEGIN(flat_hashmap)
 {
@@ -20,14 +20,14 @@ UNITTEST_SUITE_BEGIN(flat_hashmap)
         UNITTEST_TEST(fnv1a_1)
         {
             const char* str = "nintendo";
-            u64 hash = flat_hashmap_n::FNV1A64((xbyte const*)str, 8, 0);
+            u64 hash = flat_hashmap_n::FNV1A64((u8 const*)str, 8, 0);
             CHECK_EQUAL(0x997f51be06a8b6b0, hash);
         }
 
         UNITTEST_TEST(fnv1a_2)
         {
             const char* str = "HuyyoUllaPonuValiyaVidu12!";
-            u64 hash = flat_hashmap_n::FNV1A64((xbyte const*)str, 26, 0);
+            u64 hash = flat_hashmap_n::FNV1A64((u8 const*)str, 26, 0);
             CHECK_EQUAL(0x389bd94a9cbf2525, hash);
         }
 

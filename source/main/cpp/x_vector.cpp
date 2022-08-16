@@ -5,7 +5,7 @@
 
 #include "xgenerics/x_vector.h"
 
-namespace xcore
+namespace ncore
 {
     bool vector_base_t::__set_capacity(u32 new_capacity)
     {
@@ -27,7 +27,7 @@ namespace xcore
 
             ASSERT((new_capacity > 0) && (new_capacity > m_capacity));
 
-            const xsize_t desired_size = m_sizeof * new_capacity;
+            const uint_t desired_size = m_sizeof * new_capacity;
             {
                 void* new_p;
                 alloc_t* alloc = context_t::runtime_alloc();
@@ -65,7 +65,7 @@ namespace xcore
         if (m_p)
         {
             __set_capacity(0);
-            m_p        = NULL;
+            m_p        = nullptr;
             m_size     = 0;
             m_capacity = 0;
         }
@@ -101,9 +101,9 @@ namespace xcore
         const u32 num_to_move = orig_size - index;
 
         // This overwrites the destination object bits, but bitwise copyable means we don't need to worry about destruction.
-        x_memmove((xbyte*)m_p + (index + n) * m_sizeof, (xbyte*)m_p + index * m_sizeof, m_sizeof * num_to_move);
+        x_memmove((u8*)m_p + (index + n) * m_sizeof, (u8*)m_p + index * m_sizeof, m_sizeof * num_to_move);
 
-        xbyte* pDst = (xbyte*)m_p + m_sizeof * index;
+        u8* pDst = (u8*)m_p + m_sizeof * index;
 
         // This copies in the new bits, overwriting the existing objects, which is OK for copyable types that don't need destruction.
         x_memcpy(pDst, p, m_sizeof * n);
@@ -120,8 +120,8 @@ namespace xcore
 
         const u32 num_to_move = m_size - (start + n);
 
-        xbyte*       pDst = (xbyte*)m_p + start * m_sizeof;
-        const xbyte* pSrc = (xbyte*)m_p + (start + n) * m_sizeof;
+        u8*       pDst = (u8*)m_p + start * m_sizeof;
+        const u8* pSrc = (u8*)m_p + (start + n) * m_sizeof;
 
         // Copy "down" the objects to preserve, filling in the empty slots.
         x_memmove(pDst, pSrc, num_to_move * m_sizeof);
@@ -144,9 +144,9 @@ namespace xcore
     {
         const u32 min_size = math::minimum(m_size, rhs->m_size);
 
-        const xbyte* pSrc     = (xbyte*)m_p;
-        const xbyte* pSrc_end = (xbyte*)m_p + min_size * m_sizeof;
-        const xbyte* pDst     = (xbyte*)rhs->m_p;
+        const u8* pSrc     = (u8*)m_p;
+        const u8* pSrc_end = (u8*)m_p + min_size * m_sizeof;
+        const u8* pDst     = (u8*)rhs->m_p;
 
         while ((pSrc < pSrc_end) && (x_memcmp(pSrc, pDst, m_sizeof) == 0))
         {
@@ -167,12 +167,12 @@ namespace xcore
     void vector_base_t::__reverse()
     {
         u32    j    = m_size >> 1;
-        xbyte* pSrc = (xbyte*)m_p;
-        xbyte* pDst = (xbyte*)m_p + (m_size * m_sizeof);
+        u8* pSrc = (u8*)m_p;
+        u8* pDst = (u8*)m_p + (m_size * m_sizeof);
         for (u32 i = 0; i < j; i++)
         {
             pDst -= m_sizeof;
-            xmem::memswap(pSrc, pDst, m_sizeof);
+            nmem::memswap(pSrc, pDst, m_sizeof);
             pSrc += m_sizeof;
         }
     }
@@ -180,7 +180,7 @@ namespace xcore
     void* vector_base_t::__assume_ownership()
     {
         void* p    = m_p;
-        m_p        = NULL;
+        m_p        = nullptr;
         m_size     = 0;
         m_capacity = 0;
         return p;
@@ -191,7 +191,7 @@ namespace xcore
     bool vector_base_t::__grant_ownership(void* p, u32 sizeofitem, u32 size, u32 capacity)
     {
         // To to prevent the caller from obviously shooting themselves in the foot.
-        if ((((xbyte*)p + capacity) > m_p) && (p < ((xbyte*)m_p + m_capacity)))
+        if ((((u8*)p + capacity) > m_p) && (p < ((u8*)m_p + m_capacity)))
         {
             // Can grant ownership of a block inside the container itself!
             ASSERT(0);
@@ -226,4 +226,4 @@ namespace xcore
         return true;
     }
 
-} // namespace xcore
+} // namespace ncore

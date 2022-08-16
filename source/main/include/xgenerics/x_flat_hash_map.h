@@ -13,7 +13,7 @@
 #include "xbase/x_math.h"
 #include "xbase/x_memory.h"
 
-namespace xcore
+namespace ncore
 {
     namespace flat_hashmap_n
     {
@@ -57,7 +57,7 @@ namespace xcore
             // The low bits of the pointer have little or no entropy because of
             // alignment. We shift the pointer to try to use higher entropy bits. A
             // good number seems to be 12 bits, because that aligns with page size.
-            return reinterpret_cast<uptr>(unique_stable_ptr) >> 12;
+            return reinterpret_cast<ptr_t>(unique_stable_ptr) >> 12;
         }
 
         typedef u8 h2_t;
@@ -68,7 +68,10 @@ namespace xcore
         class ctrl_t
         {
         public:
-            enum { cWidth = 32 };
+            enum
+            {
+                cWidth = 32
+            };
 
             // 8 bytes
             u32 m_empty;
@@ -77,7 +80,7 @@ namespace xcore
             // 32 bytes
             union
             {
-                u32 m_hash_DW[cWidth/4];
+                u32 m_hash_DW[cWidth / 4];
                 u8  m_hash_B8[cWidth];
             };
 
@@ -182,7 +185,7 @@ namespace xcore
             {
                 m_empty   = 0xffffffff;
                 m_deleted = 0;
-                for (s8 i = 0; i < cWidth/4; ++i)
+                for (s8 i = 0; i < cWidth / 4; ++i)
                     m_hash_DW[i] = 0;
                 for (s8 i = 0; i < cWidth; ++i)
                     m_refs[i] = 0xDEADDEAD;
@@ -226,10 +229,10 @@ namespace xcore
         };
 
         // 64 bit Fowler/Noll/Vo FNV-1a hash
-        inline u64 FNV1A64(const xbyte* bp, s32 numbytes, u32 seed)
+        inline u64 FNV1A64(const u8* bp, s32 numbytes, u32 seed)
         {
-            u64          hash64 = (u64)seed ^ (14695981039346656037ull);
-            xbyte const* be     = bp + numbytes;
+            u64       hash64 = (u64)seed ^ (14695981039346656037ull);
+            u8 const* be     = bp + numbytes;
             while (bp < be)
             {
                 hash64 ^= (u64)*bp++;
@@ -241,12 +244,17 @@ namespace xcore
         template <typename Key> class Fnv1aHash
         {
         public:
-            inline u64 operator()(const Key* key) const { return FNV1A64((xbyte const*)key, sizeof(Key), 981039); }
+            inline u64 operator()(const Key* key) const { return FNV1A64((u8 const*)key, sizeof(Key), 981039); }
         };
 
         template <typename Key, typename Value, typename Hasher = Fnv1aHash<Key>> class hashmap_t
         {
             inline probe_t probe(u64 hash, u64 capacity) const { return probe_t(H1(hash, m_ctrls), capacity); }
+
+            // We have separated the ctrls, keys and values into their own array. This has multiple reasons, one
+            // is that we have no problem supporting large keys and values since we will never have to copy/move
+            // them. Secondly since the index of the key and value will also match the index of the ctrl, this
+            // means that we do not need to store any indices or pointers to the key/value.
 
             array_t<ctrl_t>* m_ctrls;
             array_t<Key>*    m_keys;
@@ -259,7 +267,7 @@ namespace xcore
             // User expects capacity to be in the number of elements
             hashmap_t(u32 size = 64)
             {
-                u32 const n = normalize_capacity((size >> 5) - 1) + 1;
+                u32 const n = normalize_capacity((size / ctrl_t::cWidth) - 1) + 1;
                 m_ctrls     = array_t<ctrl_t>::create(n, n);
                 m_keys      = array_t<Key>::create(0, n * ctrl_t::cWidth);
                 m_values    = array_t<Value>::create(0, n * ctrl_t::cWidth);
@@ -483,7 +491,7 @@ namespace xcore
             // at which we should grow the capacity.
             inline bool is_valid_capacity(u32 n) const { return ((n + 1) & n) == 0 && n > 0; }
             // Rounds up the capacity to the next power of 2 minus 1, with a minimum of 1.
-            inline u32 normalize_capacity(u32 n) const { return n ? (0xffffffff >> xcountLeadingZeros(n)) : 1; }
+            inline u32 normalize_capacity(u32 n) const { return n ? (0xffffffff >> countLeadingZeros(n)) : 1; }
             inline u32 size_to_grow(u32 max_size) const
             {
                 return (u32)(((u64)max_size * 8 - max_size) / 8); // `n*7/8`
@@ -652,7 +660,8 @@ namespace xcore
                 initialize_slots();
 
                 //
-                // The logic below supports hashing in-place.
+                // The logic below supports hashing in-place, so array_t<> is able to use
+                // virtual memory and expand/shrink their storage without a realloc.
                 //
 
                 Hasher hasher;
@@ -694,6 +703,6 @@ namespace xcore
 
     } // namespace flat_hashmap_n
 
-} // namespace xcore
+} // namespace ncore
 
 #endif // __X_GENERICS_CONTAINERS_FLAT_HASH_MAP_H__
