@@ -4,7 +4,7 @@
 #include "cgenerics/c_flat_hash_map.h"
 #include "cgenerics/c_vector.h"
 
-#include "cunittest/xunittest.h"
+#include "cunittest/cunittest.h"
 
 using namespace ncore;
 

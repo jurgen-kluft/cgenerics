@@ -1,33 +1,34 @@
-package xgenerics
+package cgenerics
 
 import (
+	cbase "github.com/jurgen-kluft/cbase/package"
 	"github.com/jurgen-kluft/ccode/denv"
-	"github.com/jurgen-kluft/xbase/package"
-	"github.com/jurgen-kluft/xentry/package"
+	centry "github.com/jurgen-kluft/centry/package"
+	cunittest "github.com/jurgen-kluft/cunittest/package"
 )
 
-// GetPackage returns the package object of 'xgenerics'
+// GetPackage returns the package object of 'cgenerics'
 func GetPackage() *denv.Package {
 	// Dependencies
-	unittestpkg := xunittest.GetPackage()
-	entrypkg := xentry.GetPackage()
-	xbasepkg := xbase.GetPackage()
+	unittestpkg := cunittest.GetPackage()
+	entrypkg := centry.GetPackage()
+	cbasepkg := cbase.GetPackage()
 
-	// The main (xgenerics) package
-	mainpkg := denv.NewPackage("xgenerics")
+	// The main (cgenerics) package
+	mainpkg := denv.NewPackage("cgenerics")
 	mainpkg.AddPackage(unittestpkg)
 	mainpkg.AddPackage(entrypkg)
-	mainpkg.AddPackage(xbasepkg)
+	mainpkg.AddPackage(cbasepkg)
 
-	// 'xgenerics' library
-	mainlib := denv.SetupDefaultCppLibProject("xgenerics", "github.com\\jurgen-kluft\\xgenerics")
-	mainlib.Dependencies = append(mainlib.Dependencies, xbasepkg.GetMainLib())
+	// 'cgenerics' library
+	mainlib := denv.SetupDefaultCppLibProject("cgenerics", "github.com\\jurgen-kluft\\cgenerics")
+	mainlib.Dependencies = append(mainlib.Dependencies, cbasepkg.GetMainLib())
 
-	// 'xgenerics' unittest project
-	maintest := denv.SetupDefaultCppTestProject("xgenerics_test", "github.com\\jurgen-kluft\\xgenerics")
+	// 'cgenerics' unittest project
+	maintest := denv.SetupDefaultCppTestProject("cgenerics_test", "github.com\\jurgen-kluft\\cgenerics")
 	maintest.Dependencies = append(maintest.Dependencies, unittestpkg.GetMainLib())
 	maintest.Dependencies = append(maintest.Dependencies, entrypkg.GetMainLib())
-	maintest.Dependencies = append(maintest.Dependencies, xbasepkg.GetMainLib())
+	maintest.Dependencies = append(maintest.Dependencies, cbasepkg.GetMainLib())
 	maintest.Dependencies = append(maintest.Dependencies, mainlib)
 
 	mainpkg.AddMainLib(mainlib)
