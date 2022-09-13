@@ -106,7 +106,7 @@ namespace ncore
         u8* pDst = (u8*)m_p + m_sizeof * index;
 
         // This copies in the new bits, overwriting the existing objects, which is OK for copyable types that don't need destruction.
-        x_memcpy(pDst, p, m_sizeof * n);
+        nmem::memcpy(pDst, p, m_sizeof * n);
     }
 
     void vector_base_t::__erase(u32 start, u32 n)
