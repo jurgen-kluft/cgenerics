@@ -10,7 +10,6 @@
 #include "cbase/c_darray.h"
 #include "cbase/c_hash.h"
 #include "cbase/c_integer.h"
-#include "cbase/c_math.h"
 #include "cbase/c_memory.h"
 
 namespace ncore

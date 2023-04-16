@@ -8,8 +8,6 @@
 
 using namespace ncore;
 
-extern ncore::alloc_t* gTestAllocator;
-
 UNITTEST_SUITE_BEGIN(flat_hashmap)
 {
     UNITTEST_FIXTURE(main)

@@ -5,8 +5,6 @@
 #pragma once
 #endif
 
-#include "cbase/c_math.h"
-
 namespace ncore
 {
     template <typename T> inline void value_copy(T* dst, T const* src, s32 item_count)
