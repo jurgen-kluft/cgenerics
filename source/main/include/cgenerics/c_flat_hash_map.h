@@ -31,14 +31,14 @@ namespace ncore
             }
             explicit operator bool() const { return m_mask != 0; }
             s8       operator*() const { return lowest_bit_set(); }
-            s8       lowest_bit_set() const { return xfindFirstBit(m_mask); }
-            s8       highest_bit_set() const { return xfindLastBit(m_mask); }
+            s8       lowest_bit_set() const { return math::findFirstBit(m_mask); }
+            s8       highest_bit_set() const { return math::findLastBit(m_mask); }
 
             bitmask_t begin() const { return *this; }
             bitmask_t end() const { return bitmask_t(0); }
 
-            u32 trailing_zeros() const { return xcountTrailingZeros(m_mask); }
-            u32 leading_zeros() const { return xcountLeadingZeros(m_mask); }
+            u32 trailing_zeros() const { return math::countTrailingZeros(m_mask); }
+            u32 leading_zeros() const { return math::countLeadingZeros(m_mask); }
 
         private:
             friend bool operator==(const bitmask_t& a, const bitmask_t& b) { return a.m_mask == b.m_mask; }
@@ -156,8 +156,8 @@ namespace ncore
             inline bool is_deleted(s8 slot) const { return (m_deleted & (1 << slot)) != 0; }
             inline bool is_used(s8 slot) const { return ((m_empty | m_deleted) & (1 << slot)) == 0; }
             inline bool is_empty_or_delete(s8 slot) const { return ((m_empty | m_deleted) & (1 << slot)) != 0; }
-            inline s8   index_of_deleted() const { return (s8)xfindFirstBit(m_deleted); }
-            inline s8   index_of_empty() const { return (s8)xfindFirstBit(m_empty); }
+            inline s8   index_of_deleted() const { return (s8)math::findFirstBit(m_deleted); }
+            inline s8   index_of_empty() const { return (s8)math::findFirstBit(m_empty); }
 
             inline void set_empty(s8 slot)
             {
@@ -266,7 +266,7 @@ namespace ncore
             // User expects capacity to be in the number of elements
             hashmap_t(u32 size = 64)
             {
-                u32 const n = normalize_capacity((size / ctrl_t::cWidth) - 1) + 1;
+                u32 const n = normalize_capacity(size / ctrl_t::cWidth) + 1;
                 m_ctrls     = array_t<ctrl_t>::create(n, n);
                 m_keys      = array_t<Key>::create(0, n * ctrl_t::cWidth);
                 m_values    = array_t<Value>::create(0, n * ctrl_t::cWidth);
