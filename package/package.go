@@ -3,7 +3,6 @@ package cgenerics
 import (
 	cbase "github.com/jurgen-kluft/cbase/package"
 	"github.com/jurgen-kluft/ccode/denv"
-	centry "github.com/jurgen-kluft/centry/package"
 	cunittest "github.com/jurgen-kluft/cunittest/package"
 )
 
@@ -11,13 +10,11 @@ import (
 func GetPackage() *denv.Package {
 	// Dependencies
 	unittestpkg := cunittest.GetPackage()
-	entrypkg := centry.GetPackage()
 	cbasepkg := cbase.GetPackage()
 
 	// The main (cgenerics) package
 	mainpkg := denv.NewPackage("cgenerics")
 	mainpkg.AddPackage(unittestpkg)
-	mainpkg.AddPackage(entrypkg)
 	mainpkg.AddPackage(cbasepkg)
 
 	// 'cgenerics' library
@@ -27,7 +24,6 @@ func GetPackage() *denv.Package {
 	// 'cgenerics' unittest project
 	maintest := denv.SetupDefaultCppTestProject("cgenerics_test", "github.com\\jurgen-kluft\\cgenerics")
 	maintest.Dependencies = append(maintest.Dependencies, unittestpkg.GetMainLib())
-	maintest.Dependencies = append(maintest.Dependencies, entrypkg.GetMainLib())
 	maintest.Dependencies = append(maintest.Dependencies, cbasepkg.GetMainLib())
 	maintest.Dependencies = append(maintest.Dependencies, mainlib)
 
